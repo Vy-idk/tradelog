@@ -1,11 +1,14 @@
-import { useLayoutEffect, useRef } from 'react'
+import { lazy, Suspense, useLayoutEffect, useRef } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import Screen from './components/Screen.tsx'
 import TabBar from './components/TabBar.tsx'
 import Journal from './screens/Journal.tsx'
 import Settings from './screens/Settings.tsx'
-import Stats from './screens/Stats.tsx'
 import TradeForm from './screens/TradeForm.tsx'
 import Watchlist from './screens/Watchlist.tsx'
+
+// Charts are the bulk of the bundle, so they load when Stats is first opened
+const Stats = lazy(() => import('./screens/Stats.tsx'))
 
 /** The four tab screens share one scroll area above the bottom tab bar. */
 function TabLayout() {
@@ -32,7 +35,14 @@ function App() {
     <Routes>
       <Route element={<TabLayout />}>
         <Route path="/" element={<Journal />} />
-        <Route path="/stats" element={<Stats />} />
+        <Route
+          path="/stats"
+          element={
+            <Suspense fallback={<Screen title="Stats" />}>
+              <Stats />
+            </Suspense>
+          }
+        />
         <Route path="/watchlist" element={<Watchlist />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

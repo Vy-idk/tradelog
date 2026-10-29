@@ -19,3 +19,10 @@ export function parseIsoDate(value: string): Date {
   const [y, m, d] = value.split('-').map(Number)
   return new Date(y, m - 1, d)
 }
+
+/** Shifts a YYYY-MM-DD date by whole calendar days. */
+export function addDays(value: string, days: number): string {
+  const date = parseIsoDate(value)
+  date.setDate(date.getDate() + days)
+  return today(date)
+}

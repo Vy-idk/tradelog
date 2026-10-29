@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigationType, useSearchParams } from 'react-router-dom'
+import BackupReminder from '../components/BackupReminder.tsx'
 import QuickCloseDialog from '../components/QuickCloseDialog.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
 import TradeRow from '../components/TradeRow.tsx'
@@ -124,6 +125,7 @@ function Journal() {
   return (
     <Screen title="Journal">
       <div ref={anchor} />
+      <BackupReminder />
       {trades === undefined ? null : trades.length === 0 ? (
         <EmptyState text="No trades yet. Tap + to log your first one." />
       ) : (

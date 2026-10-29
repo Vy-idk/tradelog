@@ -7,10 +7,19 @@ export const DEFAULT_SETTINGS: Settings = {
   currency: 'USD',
   startingBalance: 0,
   lastBackupAt: null,
+  backupReminderSnoozedUntil: null,
 }
 
 /** The single settings row merged over defaults, so it's never missing a field. */
 export function useSettings(): Settings {
   const row = useLiveQuery(() => db.settings.get('app'))
   return { ...DEFAULT_SETTINGS, ...row }
+}
+
+/** Saves some settings, creating the row on first use. */
+export async function updateSettings(changes: Partial<Omit<Settings, 'id'>>): Promise<void> {
+  await db.transaction('rw', db.settings, async () => {
+    const current = await db.settings.get('app')
+    await db.settings.put({ ...DEFAULT_SETTINGS, ...current, ...changes })
+  })
 }

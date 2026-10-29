@@ -42,6 +42,8 @@ export type Settings = {
   currency: string
   startingBalance: number
   lastBackupAt: number | null
+  /** The backup reminder stays hidden until this time after tapping "Later" */
+  backupReminderSnoozedUntil: number | null
 }
 
 export class TradeLogDB extends Dexie {
