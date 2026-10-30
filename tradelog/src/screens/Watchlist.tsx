@@ -35,6 +35,7 @@ import {
   formatSignedPrice,
 } from '../lib/format.ts'
 import type { ExtendedError, LivePrice } from '../lib/extended.ts'
+import { TRADE_CURRENCY } from '../lib/fx.ts'
 import { distinctSorted } from '../lib/journal.ts'
 import { priceSessionLong, sessionAt, type PriceSession } from '../lib/market.ts'
 import { isClosed, openPositions, unrealizedPnl, unrealizedReturnPct } from '../lib/pnl.ts'
@@ -766,7 +767,7 @@ function Watchlist() {
                 prices={live.prices}
                 failures={failures}
                 loading={loading}
-                currency={settings.currency}
+                currency={TRADE_CURRENCY}
                 now={now}
               />
             )}

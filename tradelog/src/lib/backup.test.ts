@@ -68,7 +68,13 @@ describe('createBackup and parseBackup', () => {
       now,
     )
     expect(JSON.stringify(backup)).not.toContain('secret')
-    expect(backup.settings).toEqual({ currency: 'ILS', startingBalance: 25_000 })
+    expect(backup.settings).toEqual({
+      currency: 'ILS',
+      balanceMode: 'starting',
+      startingBalance: 25_000,
+      startingBalanceCurrency: 'USD',
+      cashBalances: [],
+    })
   })
 
   it('names files by date', () => {
@@ -130,6 +136,42 @@ describe('parseBackup rejects bad files', () => {
     expect(error({ ...raw, settings: { currency: 'USD', startingBalance: -5 } })).toMatch(
       /starting balance/,
     )
+    expect(
+      error({ ...raw, settings: { ...raw.settings, cashBalances: [{ id: 'c', amount: 'lots' }] } }),
+    ).toMatch(/cash balance/)
+  })
+
+  it('reads settings from before balances had their own currency', () => {
+    const raw = validRaw()
+    raw.settings = { currency: 'ils', startingBalance: 25_000 }
+    const result = parseRaw(raw)
+    expect(result.ok && result.backup.settings).toEqual({
+      currency: 'ILS',
+      balanceMode: 'starting',
+      startingBalance: 25_000,
+      startingBalanceCurrency: 'ILS',
+      cashBalances: [],
+    })
+  })
+
+  it('round-trips cash balances', () => {
+    const cashBalances = [
+      { id: 'a', label: 'Broker', amount: 5_000, currency: 'USD' },
+      { id: 'b', label: '', amount: 12_000, currency: 'ILS' },
+    ]
+    const backup = createBackup(
+      {
+        trades: [],
+        watchlist: [],
+        settings: { ...settings, balanceMode: 'current', cashBalances },
+      },
+      now,
+    )
+    const result = parseBackup(JSON.stringify(backup))
+    expect(result.ok && result.backup.settings).toMatchObject({
+      balanceMode: 'current',
+      cashBalances,
+    })
   })
 })
 

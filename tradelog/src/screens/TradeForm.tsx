@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -14,11 +15,14 @@ import { EmptyState } from '../components/Screen.tsx'
 import { SearchIcon } from '../components/icons.tsx'
 import { chipClass, fieldA11y, inputClass } from '../components/styles.ts'
 import type { Side, Trade } from '../db/schema.ts'
-import { useSettings } from '../db/settings.ts'
+import { useLoadedSettings } from '../db/settings.ts'
+import { checkSymbol } from '../db/symbols.ts'
 import { addTrade, deleteTrade, updateTrade, useTrade, useTrades } from '../db/trades.ts'
 import { today } from '../lib/dates.ts'
 import { formatPrice, formatQuantity } from '../lib/format.ts'
+import { TRADE_CURRENCY } from '../lib/fx.ts'
 import { journalScroll, strategySuggestions, tagSuggestions } from '../lib/journal.ts'
+import { uncheckedText, type SymbolCheck } from '../lib/symbols.ts'
 import {
   addTag,
   draftFromTrade,
@@ -26,6 +30,7 @@ import {
   emptyDraft,
   FIELD_ORDER,
   normalizeSymbol,
+  symbolError,
   validateDraft,
   type DraftField,
   type TradeDraft,
@@ -33,6 +38,15 @@ import {
 import { useGoBack } from '../lib/useGoBack.ts'
 
 const fieldId = (field: DraftField) => `trade-${field}`
+
+/** The company name once a symbol checks out, or why it couldn't be checked. */
+function symbolHint(check: SymbolCheck | null, kept: boolean): string | undefined {
+  if (kept) return 'Not found on US exchanges; kept as typed'
+  if (!check) return undefined
+  if (check.status === 'valid') return check.name || 'Listed in the US'
+  if (check.status === 'unchecked') return uncheckedText[check.reason]
+  return undefined
+}
 
 /** Header + scrolling body used by the form and its loading / not-found states. */
 function FormShell({
@@ -106,7 +120,7 @@ function TradeForm() {
 
 function TradeFormBody({ trade }: { trade: Trade | null }) {
   const goBack = useGoBack()
-  const { currency } = useSettings()
+  const apiKey = useLoadedSettings()?.finnhubApiKey
   const trades = useTrades()
   const isNew = trade === null
   // "Log a trade" on the watchlist opens the form with the symbol filled in
@@ -124,6 +138,31 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
   const [saveError, setSaveError] = useState('')
   const [confirm, setConfirm] = useState<'delete' | 'discard' | null>(null)
   const exitPriceRef = useRef<HTMLInputElement>(null)
+
+  // Symbols are checked against US listings a moment after typing stops.
+  // A saved trade's own symbol isn't checked again.
+  const symbol = normalizeSymbol(draft.symbol)
+  const needsCheck = !symbolError(symbol) && symbol !== trade?.symbol
+  const [check, setCheck] = useState<SymbolCheck | null>(null)
+  const [symbolTouched, setSymbolTouched] = useState(false)
+  /** A symbol kept even though it isn't listed, e.g. a delisted stock */
+  const [keptSymbol, setKeptSymbol] = useState('')
+  useEffect(() => {
+    if (!needsCheck || apiKey === undefined) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void checkSymbol(symbol, apiKey).then((r) => {
+        if (!cancelled) setCheck(r)
+      })
+    }, 600)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [symbol, needsCheck, apiKey])
+  const symbolCheck = needsCheck && check?.symbol === symbol ? check : null
+  const unlisted =
+    symbolCheck?.status === 'invalid' && keptSymbol !== symbol && (symbolTouched || submitted)
 
   // Tag text that hasn't been turned into a chip yet still counts on save
   const finalDraft = useMemo(
@@ -194,6 +233,15 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
     setSaving(true)
     setSaveError('')
     try {
+      if (needsCheck && keptSymbol !== symbol) {
+        const checked = symbolCheck ?? (await checkSymbol(symbol, apiKey ?? ''))
+        setCheck(checked)
+        if (checked.status === 'invalid') {
+          setSaving(false)
+          document.getElementById(fieldId('symbol'))?.focus()
+          return
+        }
+      }
       if (trade) await updateTrade(trade.id, result.value)
       else {
         await addTrade(result.value)
@@ -247,12 +295,23 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
         )}
 
         <div className="grid grid-cols-[1fr_auto] items-start gap-3">
-          <Field id={fieldId('symbol')} label="Symbol" error={errors.symbol}>
+          <Field
+            id={fieldId('symbol')}
+            label="Symbol"
+            error={
+              errors.symbol ?? (unlisted ? `${symbol} isn't listed on a US exchange` : undefined)
+            }
+            hint={symbolHint(symbolCheck, needsCheck && keptSymbol === symbol)}
+          >
             <input
-              {...fieldA11y(fieldId('symbol'), errors.symbol)}
+              {...fieldA11y(
+                fieldId('symbol'),
+                errors.symbol ?? (unlisted ? 'unlisted' : undefined),
+              )}
               className={`${inputClass} font-semibold uppercase`}
               value={draft.symbol}
               onChange={(e) => set('symbol', e.target.value.toUpperCase())}
+              onBlur={() => setSymbolTouched(true)}
               placeholder="AAPL"
               autoFocus={isNew && !presetSymbol}
               autoCapitalize="characters"
@@ -280,6 +339,16 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
             </div>
           </fieldset>
         </div>
+
+        {unlisted && !errors.symbol && (
+          <button
+            type="button"
+            onClick={() => setKeptSymbol(symbol)}
+            className="-mt-3 text-sm text-muted underline underline-offset-2"
+          >
+            Delisted? Keep {symbol} anyway
+          </button>
+        )}
 
         {isNew && draft.symbol === '' && recentSymbols.length > 0 && (
           <div className="-mt-3 flex flex-wrap gap-2" aria-label="Recent symbols">
@@ -394,7 +463,7 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
               Clear exit (mark as open)
             </button>
           )}
-          {result.ok && <PnlPreview trade={result.value} currency={currency} />}
+          {result.ok && <PnlPreview trade={result.value} currency={TRADE_CURRENCY} />}
         </section>
 
         <Field id={fieldId('strategy')} label="Strategy" error={errors.strategy}>

@@ -1,4 +1,4 @@
-import type { Settings, Trade, WatchItem } from '../db/schema.ts'
+import type { CashBalance, Settings, Trade, WatchItem } from '../db/schema.ts'
 import { isIsoDate, today } from './dates.ts'
 import { returnPct, tradePnl } from './pnl.ts'
 
@@ -7,7 +7,10 @@ export const BACKUP_APP = 'tradelog'
 export const BACKUP_VERSION = 1
 
 /** Settings worth restoring. The API key stays out of files that end up in iCloud. */
-export type BackupSettings = Pick<Settings, 'currency' | 'startingBalance'>
+export type BackupSettings = Pick<
+  Settings,
+  'currency' | 'balanceMode' | 'startingBalance' | 'startingBalanceCurrency' | 'cashBalances'
+>
 
 export type Backup = {
   app: typeof BACKUP_APP
@@ -35,7 +38,10 @@ export function createBackup(source: BackupSource, now = new Date()): Backup {
     watchlist: source.watchlist,
     settings: {
       currency: source.settings.currency,
+      balanceMode: source.settings.balanceMode,
       startingBalance: source.settings.startingBalance,
+      startingBalanceCurrency: source.settings.startingBalanceCurrency,
+      cashBalances: source.settings.cashBalances,
     },
   }
 }
@@ -43,7 +49,6 @@ export function createBackup(source: BackupSource, now = new Date()): Backup {
 export function backupFileName(kind: 'backup' | 'trades', now = new Date()): string {
   return `tradelog-${kind}-${today(now)}.${kind === 'backup' ? 'json' : 'csv'}`
 }
-
 
 export type ParseResult = { ok: true; backup: Backup } | { ok: false; error: string }
 
@@ -127,12 +132,40 @@ function readWatchItem(raw: unknown, now: number): WatchItem {
 function readSettings(raw: unknown): BackupSettings | null {
   if (raw === undefined || raw === null) return null
   if (!isObject(raw)) throw new FieldError("isn't a settings object")
-  const { currency, startingBalance } = raw
-  if (typeof currency !== 'string' || !/^[A-Za-z]{3}$/.test(currency))
-    throw new FieldError('currency must be a 3-letter code')
+  const { currency, startingBalance, balanceMode = 'starting', cashBalances = [] } = raw
+  if (!isCurrency(currency)) throw new FieldError('currency must be a 3-letter code')
   if (!isNumber(startingBalance) || startingBalance < 0)
     throw new FieldError("starting balance must be a number that isn't negative")
-  return { currency: currency.toUpperCase(), startingBalance }
+  // Files from before balances had their own currency used the main one
+  const startingBalanceCurrency = raw.startingBalanceCurrency ?? currency
+  if (!isCurrency(startingBalanceCurrency))
+    throw new FieldError('starting balance currency must be a 3-letter code')
+  if (balanceMode !== 'starting' && balanceMode !== 'current')
+    throw new FieldError('balance mode must be starting or current')
+  if (!Array.isArray(cashBalances)) throw new FieldError('cash balances must be a list')
+  return {
+    currency: currency.toUpperCase(),
+    balanceMode,
+    startingBalance,
+    startingBalanceCurrency: startingBalanceCurrency.toUpperCase(),
+    cashBalances: cashBalances.map(readCashBalance),
+  }
+}
+
+const isCurrency = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z]{3}$/.test(v)
+
+function readCashBalance(raw: unknown): CashBalance {
+  if (!isObject(raw)) throw new FieldError("a cash balance isn't an object")
+  const { id, amount, currency } = raw
+  if (typeof id !== 'string' || !id) throw new FieldError('a cash balance is missing its id')
+  if (!isNumber(amount)) throw new FieldError('a cash balance amount must be a number')
+  if (!isCurrency(currency)) throw new FieldError('a cash balance currency must be a 3-letter code')
+  return {
+    id,
+    label: optionalString(raw, 'label').trim(),
+    amount,
+    currency: currency.toUpperCase(),
+  }
 }
 
 /** Reads each item, collecting errors instead of stopping at the first. */
@@ -217,7 +250,7 @@ export function parseBackup(text: string, now = Date.now()): ParseResult {
     return {
       ok: false,
       error: [
-        "This backup has problems, so nothing was imported:",
+        'This backup has problems, so nothing was imported:',
         ...errors.slice(0, MAX_ERRORS_SHOWN),
         ...(more > 0 ? [`…and ${more} more`] : []),
       ].join('\n'),
@@ -244,7 +277,6 @@ export function parseBackup(text: string, now = Date.now()): ParseResult {
     },
   }
 }
-
 
 export type ImportMode = 'merge' | 'replace'
 
@@ -320,7 +352,6 @@ export function planImport(
   }
 }
 
-
 const CSV_COLUMNS = [
   'Symbol',
   'Side',
@@ -380,7 +411,6 @@ export function tradesCsv(trades: Trade[]): string {
     })
   return [CSV_COLUMNS.map(csvCell).join(','), ...rows].join('\r\n') + '\r\n'
 }
-
 
 export const BACKUP_REMINDER_DAYS = 7
 const DAY = 86_400_000

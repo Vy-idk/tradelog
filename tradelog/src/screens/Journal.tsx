@@ -8,10 +8,10 @@ import { FilterIcon, JournalIcon } from '../components/icons.tsx'
 import { primaryActionClass, secondaryActionClass } from '../components/styles.ts'
 import { useLivePrices } from '../db/quotes.ts'
 import type { Trade } from '../db/schema.ts'
-import { useSettings } from '../db/settings.ts'
 import { useTrades } from '../db/trades.ts'
 import { distinctSorted, filterTrades, journalScroll, type JournalFilters } from '../lib/journal.ts'
 import type { LivePrice } from '../lib/extended.ts'
+import { TRADE_CURRENCY } from '../lib/fx.ts'
 import { isClosed } from '../lib/pnl.ts'
 import { isStale } from '../lib/prices.ts'
 import { useNow } from '../lib/useNow.ts'
@@ -97,7 +97,6 @@ function useJournalScroll(ready: boolean) {
 
 function Journal() {
   const trades = useTrades()
-  const { currency } = useSettings()
   const [params, setParams] = useSearchParams()
   const [closing, setClosing] = useState<Trade | null>(null)
   const anchor = useJournalScroll(trades !== undefined)
@@ -216,7 +215,7 @@ function Journal() {
                 <TradeRow
                   key={t.id}
                   trade={t}
-                  currency={currency}
+                  currency={TRADE_CURRENCY}
                   live={prices?.get(t.symbol)}
                   liveStale={stale(prices?.get(t.symbol))}
                   onQuickClose={setClosing}
@@ -246,7 +245,11 @@ function Journal() {
         </svg>
       </Link>
 
-      <QuickCloseDialog trade={closing} currency={currency} onClose={() => setClosing(null)} />
+      <QuickCloseDialog
+        trade={closing}
+        currency={TRADE_CURRENCY}
+        onClose={() => setClosing(null)}
+      />
     </Screen>
   )
 }

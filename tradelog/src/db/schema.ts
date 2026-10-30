@@ -70,13 +70,49 @@ export type ExtendedQuote = {
   fetchedAt: number
 }
 
+/** Cash held in one currency, e.g. dollars at the broker or shekels in the bank. */
+export type CashBalance = {
+  id: string
+  /** Optional, e.g. "IBKR cash" */
+  label: string
+  amount: number
+  currency: string
+}
+
+/** A symbol checked against Finnhub's US listings. A cache, never backed up. */
+export type SymbolInfo = {
+  symbol: string
+  /** Company or fund name; blank when only a price confirmed it */
+  name: string
+  valid: boolean
+  checkedAt: number
+}
+
+/** The last exchange rates fetched, kept for offline use. A cache, never backed up. */
+export type FxRatesRow = {
+  base: 'USD'
+  /** Units of each currency per 1 USD */
+  rates: Record<string, number>
+  /** YYYY-MM-DD the rates were set */
+  date: string
+  fetchedAt: number
+}
+
 export type Settings = {
   id: 'app'
   finnhubApiKey: string
   /** The Cloudflare Worker that relays Yahoo's pre-market and after-hours prices */
   priceRelayUrl: string
+  /** Main currency: Stats show money in it. Trades themselves are always in dollars. */
   currency: string
+  /** Start from a known balance, or work back from the cash held today */
+  balanceMode: 'starting' | 'current'
   startingBalance: number
+  startingBalanceCurrency: string
+  /** Cash held today, used when balanceMode is 'current' */
+  cashBalances: CashBalance[]
+  /** The currency picked on the Stats screen; blank means the main currency */
+  statsCurrency: string
   lastBackupAt: number | null
   /** The backup reminder stays hidden until this time after tapping "Later" */
   backupReminderSnoozedUntil: number | null
@@ -90,6 +126,9 @@ export class TradeLogDB extends Dexie {
   quotes!: Table<Quote, string>
   /** Also a cache, like quotes */
   extendedQuotes!: Table<ExtendedQuote, string>
+  /** Caches too */
+  symbols!: Table<SymbolInfo, string>
+  fxRates!: Table<FxRatesRow, string>
 
   constructor() {
     super('tradelog')
@@ -107,6 +146,21 @@ export class TradeLogDB extends Dexie {
     this.version(3).stores({
       extendedQuotes: 'symbol',
     })
+    // The starting balance used to share the one currency setting, so it
+    // keeps that currency now that trades are always in dollars
+    this.version(4)
+      .stores({
+        symbols: 'symbol',
+        fxRates: 'base',
+      })
+      .upgrade((tx) =>
+        tx
+          .table('settings')
+          .toCollection()
+          .modify((s: Partial<Settings>) => {
+            s.startingBalanceCurrency ??= s.currency ?? 'USD'
+          }),
+      )
   }
 }
 

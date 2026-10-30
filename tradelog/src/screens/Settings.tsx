@@ -19,9 +19,10 @@ import {
   useBackupSource,
   type SaveOutcome,
 } from '../db/backup.ts'
+import { useFxRates, useFxRefresh } from '../db/fx.ts'
 import { testApiKey, testRelay } from '../db/quotes.ts'
-import type { Settings as AppSettings } from '../db/schema.ts'
-import { updateSettings } from '../db/settings.ts'
+import type { Settings as AppSettings, CashBalance } from '../db/schema.ts'
+import { updateCashBalances, updateSettings } from '../db/settings.ts'
 import {
   backupReminderDue,
   parseBackup,
@@ -33,6 +34,8 @@ import {
 } from '../lib/backup.ts'
 import { formatDaysAgo, formatMoney, formatPrice } from '../lib/format.ts'
 import type { ExtendedResult } from '../lib/extended.ts'
+import { accountCurrencies, FX_CURRENCIES, sumBalances, type FxRates } from '../lib/fx.ts'
+import { newId } from '../lib/id.ts'
 import type { QuoteResult } from '../lib/prices.ts'
 import {
   appVersion,
@@ -49,14 +52,33 @@ const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'ILS', 'CAD', 'AUD', 'CHF', 'JPY
 const currencyNames = new Intl.DisplayNames(undefined, { type: 'currency' })
 const currencyLabel = (code: string) => `${code} · ${currencyNames.of(code) ?? code}`
 
-/** Every currency the browser knows, minus the common ones shown first. */
-const otherCurrencies = (() => {
-  try {
-    return Intl.supportedValuesOf('currency').filter((c) => !COMMON_CURRENCIES.includes(c))
-  } catch {
-    return []
-  }
-})()
+/** Currencies with an exchange rate, minus the common ones shown first. */
+const otherCurrencies = FX_CURRENCIES.filter((c) => !COMMON_CURRENCIES.includes(c))
+
+/** Common currencies first, then the rest; a saved one that's no longer listed stays on top. */
+function CurrencyOptions({ current, short }: { current: string; short?: boolean }) {
+  const label = short ? (c: string) => c : currencyLabel
+  const common =
+    COMMON_CURRENCIES.includes(current) || otherCurrencies.includes(current)
+      ? COMMON_CURRENCIES
+      : [current, ...COMMON_CURRENCIES]
+  return (
+    <>
+      {common.map((c) => (
+        <option key={c} value={c}>
+          {label(c)}
+        </option>
+      ))}
+      <optgroup label="More currencies">
+        {otherCurrencies.map((c) => (
+          <option key={c} value={c}>
+            {label(c)}
+          </option>
+        ))}
+      </optgroup>
+    </>
+  )
+}
 
 const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -75,8 +97,74 @@ function Section({ id, title, children }: { id?: string; title: string; children
 
 const balanceText = (value: number) => (value ? String(value) : '')
 
+/** Reads a typed balance: a number, or an error message. Blank is zero. */
+function readAmount(text: string, label: string): number | string {
+  const value = parseNumber(text) ?? 0
+  if (/^-/.test(text.trim())) return `${label} can't be negative`
+  if (Number.isNaN(value)) return 'Enter a number, e.g. 10000'
+  if (value > 1e12) return 'That number is too large'
+  return value
+}
+
+const segmentClass =
+  'flex-1 rounded-md px-3 py-2 text-sm font-semibold text-muted aria-pressed:bg-surface aria-pressed:text-inherit aria-pressed:shadow'
+
 function AccountSettings({ settings }: { settings: AppSettings }) {
-  const { currency, startingBalance } = settings
+  const { currency, balanceMode } = settings
+  const rates = useFxRates()
+  useFxRefresh(accountCurrencies(settings).length > 1)
+
+  return (
+    <div className="space-y-4">
+      <Field
+        id="settings-currency"
+        label="Main currency"
+        hint="Stats show money in this currency, and can switch to US dollars. Trades are always in dollars."
+      >
+        <select
+          id="settings-currency"
+          className={inputClass}
+          value={currency}
+          // A new main currency is what Stats should show next
+          onChange={(e) => updateSettings({ currency: e.target.value, statsCurrency: '' })}
+        >
+          <CurrencyOptions current={currency} />
+        </select>
+      </Field>
+
+      <fieldset>
+        <legend className="mb-1 text-sm text-muted">Account balance</legend>
+        <div className="flex rounded-lg border border-border bg-bg p-1">
+          <button
+            type="button"
+            aria-pressed={balanceMode === 'starting'}
+            onClick={() => updateSettings({ balanceMode: 'starting' })}
+            className={segmentClass}
+          >
+            Starting balance
+          </button>
+          <button
+            type="button"
+            aria-pressed={balanceMode === 'current'}
+            onClick={() => updateSettings({ balanceMode: 'current' })}
+            className={segmentClass}
+          >
+            Cash today
+          </button>
+        </div>
+      </fieldset>
+
+      {balanceMode === 'starting' ? (
+        <StartingBalance settings={settings} />
+      ) : (
+        <CashBalances settings={settings} rates={rates ?? null} />
+      )}
+    </div>
+  )
+}
+
+function StartingBalance({ settings }: { settings: AppSettings }) {
+  const { startingBalance, startingBalanceCurrency } = settings
   const [balance, setBalance] = useState(balanceText(startingBalance))
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
@@ -88,17 +176,10 @@ function AccountSettings({ settings }: { settings: AppSettings }) {
     setBalance(balanceText(startingBalance))
   }
 
-  const currencies = COMMON_CURRENCIES.includes(currency)
-    ? COMMON_CURRENCIES
-    : [currency, ...COMMON_CURRENCIES]
-
   async function saveBalance(e?: FormEvent) {
     e?.preventDefault()
-    const text = balance.trim()
-    const value = parseNumber(text) ?? 0
-    if (/^-/.test(text)) return setError("Starting balance can't be negative")
-    if (Number.isNaN(value)) return setError('Enter a number, e.g. 10000')
-    if (value > 1e12) return setError('That number is too large')
+    const value = readAmount(balance, 'Starting balance')
+    if (typeof value === 'string') return setError(value)
     setError('')
     if (value === startingBalance) return
     await updateSettings({ startingBalance: value })
@@ -106,56 +187,199 @@ function AccountSettings({ settings }: { settings: AppSettings }) {
   }
 
   return (
-    <form noValidate onSubmit={saveBalance} className="space-y-4">
-      <Field id="settings-currency" label="Currency">
-        <select
-          id="settings-currency"
-          className={inputClass}
-          value={currency}
-          onChange={(e) => updateSettings({ currency: e.target.value })}
-        >
-          {currencies.map((c) => (
-            <option key={c} value={c}>
-              {currencyLabel(c)}
-            </option>
-          ))}
-          {otherCurrencies.length > 0 && (
-            <optgroup label="All currencies">
-              {otherCurrencies.map((c) => (
-                <option key={c} value={c}>
-                  {currencyLabel(c)}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
-      </Field>
+    <form noValidate onSubmit={saveBalance}>
       <Field
         id="settings-balance"
         label="Starting balance"
         error={error}
         hint={
           saved
-            ? `Saved: ${formatMoney(startingBalance, currency)}`
+            ? `Saved: ${formatMoney(startingBalance, startingBalanceCurrency)}`
             : 'Account value before your first logged trade; the equity curve starts here'
         }
       >
+        <div className="flex gap-2">
+          <input
+            {...fieldA11y('settings-balance', error || undefined)}
+            className={`${inputClass} flex-1`}
+            value={balance}
+            onChange={(e) => {
+              setBalance(e.target.value)
+              setSaved(false)
+            }}
+            onBlur={() => saveBalance()}
+            inputMode="decimal"
+            autoComplete="off"
+            enterKeyHint="done"
+            placeholder="0.00"
+          />
+          <div className="w-24 shrink-0">
+            <select
+              aria-label="Starting balance currency"
+              className={inputClass}
+              value={startingBalanceCurrency}
+              onChange={(e) => updateSettings({ startingBalanceCurrency: e.target.value })}
+            >
+              <CurrencyOptions current={startingBalanceCurrency} short />
+            </select>
+          </div>
+        </div>
+      </Field>
+    </form>
+  )
+}
+
+function CashBalances({ settings, rates }: { settings: AppSettings; rates: FxRates | null }) {
+  const { cashBalances, currency } = settings
+  const total = sumBalances(cashBalances, currency, rates)
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted">
+        The cash in your account today, in any currency. TradeLog adds your open trades at cost and
+        works back through your closed trades to where you started.
+      </p>
+      {cashBalances.length > 0 && (
+        <ul className="space-y-3">
+          {cashBalances.map((c, i) => (
+            <CashBalanceRow
+              key={c.id}
+              index={i}
+              balance={c}
+              onSave={(changes) =>
+                updateCashBalances((list) =>
+                  list.map((x) => (x.id === c.id ? { ...x, ...changes } : x)),
+                )
+              }
+              onRemove={() => updateCashBalances((list) => list.filter((x) => x.id !== c.id))}
+            />
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={() =>
+          updateCashBalances((list) => [
+            ...list,
+            {
+              id: newId(),
+              label: '',
+              amount: 0,
+              // Most people add dollars at the broker first, then other cash
+              currency: list.some((c) => c.currency === 'USD') ? currency : 'USD',
+            },
+          ])
+        }
+        className="w-full rounded-xl border border-border py-3 font-medium"
+      >
+        Add cash balance
+      </button>
+      {cashBalances.length > 1 && (
+        <p className="text-sm text-muted tabular-nums">
+          Total:{' '}
+          {total === null
+            ? 'needs exchange rates, which load when you’re online'
+            : `${formatMoney(total, currency)} at today’s rates`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function CashBalanceRow({
+  index,
+  balance,
+  onSave,
+  onRemove,
+}: {
+  index: number
+  balance: CashBalance
+  onSave: (changes: Partial<Omit<CashBalance, 'id'>>) => void
+  onRemove: () => void
+}) {
+  const id = `settings-cash-${index}`
+  const [label, setLabel] = useState(balance.label)
+  const [amount, setAmount] = useState(balanceText(balance.amount))
+  const [error, setError] = useState('')
+
+  // Show stored values after saving, or when a restore changes them. Compared
+  // by value, since every save reloads all balances as new objects.
+  const stored = `${balance.label}
+${balance.amount}`
+  const [shown, setShown] = useState(stored)
+  if (shown !== stored) {
+    setShown(stored)
+    setLabel(balance.label)
+    setAmount(balanceText(balance.amount))
+  }
+
+  function saveText() {
+    const value = readAmount(amount, 'Cash')
+    if (typeof value === 'string') return setError(value)
+    setError('')
+    const trimmed = label.trim()
+    if (value !== balance.amount || trimmed !== balance.label) {
+      onSave({ label: trimmed, amount: value })
+    }
+  }
+
+  return (
+    <li className="space-y-2 rounded-lg border border-border p-3">
+      <div className="flex gap-2">
+        <label htmlFor={`${id}-label`} className="sr-only">
+          Name
+        </label>
         <input
-          {...fieldA11y('settings-balance', error || undefined)}
-          className={inputClass}
-          value={balance}
-          onChange={(e) => {
-            setBalance(e.target.value)
-            setSaved(false)
-          }}
-          onBlur={() => saveBalance()}
+          id={`${id}-label`}
+          className={`${inputClass} flex-1`}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onBlur={saveText}
+          autoComplete="off"
+          maxLength={40}
+          placeholder="Name, e.g. Broker cash"
+        />
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${balance.label || 'this balance'}`}
+          className="shrink-0 rounded-lg border border-border px-3 text-sm font-medium text-muted"
+        >
+          Remove
+        </button>
+      </div>
+      <div className="flex gap-2">
+        <label htmlFor={id} className="sr-only">
+          Amount
+        </label>
+        <input
+          {...fieldA11y(id, error || undefined)}
+          className={`${inputClass} flex-1`}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          onBlur={saveText}
           inputMode="decimal"
           autoComplete="off"
           enterKeyHint="done"
           placeholder="0.00"
         />
-      </Field>
-    </form>
+        <div className="w-24 shrink-0">
+          <select
+            aria-label="Currency"
+            className={inputClass}
+            value={balance.currency}
+            onChange={(e) => onSave({ currency: e.target.value })}
+          >
+            <CurrencyOptions current={balance.currency} short />
+          </select>
+        </div>
+      </div>
+      {error && (
+        <p id={`${id}-error`} className="text-sm text-loss">
+          {error}
+        </p>
+      )}
+    </li>
   )
 }
 
@@ -567,8 +791,8 @@ function BackupSettings({ source }: { source: BackupSource }) {
       )}
 
       <p className="text-xs text-muted">
-        A backup holds your trades, watchlist, currency and starting balance. Your API key isn't
-        included. CSV is for spreadsheets and can't be restored.
+        A backup holds your trades, watchlist, currencies and balances. Your API key isn't included.
+        CSV is for spreadsheets and can't be restored.
       </p>
 
       <RestoreDialog
@@ -689,7 +913,9 @@ function RestoreDialog({
               {replace.removed > 0 && (
                 <>
                   {' '}
-                  and <span className="text-loss">deletes {plural(replace.removed, 'trade')}</span>{' '}
+                  and <span className="text-loss">
+                    deletes {plural(replace.removed, 'trade')}
+                  </span>{' '}
                   that aren't in it
                 </>
               )}

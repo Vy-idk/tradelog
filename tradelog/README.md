@@ -24,7 +24,10 @@ TradeLog never places trades and gives no investment advice.
    separate copy of your data, and Safari can erase it after 7 days without a
    visit.
 4. In **Settings**, paste a free [Finnhub API key](https://finnhub.io/register)
-   for prices, and set your currency and starting balance.
+   for prices and symbol checks. Pick your main currency, then either a
+   starting balance or the cash you hold today (in any currencies). Trades are
+   always in US dollars; Stats can switch between dollars and your currency at
+   today's exchange rate.
 
 Your journal lives only on the phone. Deleting the home screen icon, or
 clearing Safari's website data, deletes it too, so export a backup to Files or

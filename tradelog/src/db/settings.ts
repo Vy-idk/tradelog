@@ -1,12 +1,16 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Settings } from './schema.ts'
+import { db, type CashBalance, type Settings } from './schema.ts'
 
 export const DEFAULT_SETTINGS: Settings = {
   id: 'app',
   finnhubApiKey: '',
   priceRelayUrl: '',
   currency: 'USD',
+  balanceMode: 'starting',
   startingBalance: 0,
+  startingBalanceCurrency: 'USD',
+  cashBalances: [],
+  statsCurrency: '',
   lastBackupAt: null,
   backupReminderSnoozedUntil: null,
 }
@@ -20,6 +24,19 @@ export function useSettings(): Settings {
 /** Like useSettings, but undefined while loading, so screens don't flash the defaults. */
 export function useLoadedSettings(): Settings | undefined {
   return useLiveQuery(async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get('app')) }))
+}
+
+/**
+ * Changes the cash balance list as it is stored, not as a screen last saw it,
+ * so quick edits to two balances can't overwrite each other.
+ */
+export async function updateCashBalances(
+  change: (balances: CashBalance[]) => CashBalance[],
+): Promise<void> {
+  await db.transaction('rw', db.settings, async () => {
+    const current = { ...DEFAULT_SETTINGS, ...(await db.settings.get('app')) }
+    await db.settings.put({ ...current, cashBalances: change(current.cashBalances) })
+  })
 }
 
 /** Saves some settings, creating the row on first use. */
