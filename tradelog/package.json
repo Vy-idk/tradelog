@@ -1,13 +1,14 @@
 {
   "name": "tradelog",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "images": "node scripts/generate-images.ts",
     "test": "vitest --passWithNoTests",
     "relay:dev": "npx --yes wrangler@4 dev --config relay/wrangler.toml --ip 127.0.0.1 --port 8787",
     "relay:deploy": "npx --yes wrangler@4 deploy --config relay/wrangler.toml"

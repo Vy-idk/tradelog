@@ -10,6 +10,8 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import ConfirmDialog from '../components/ConfirmDialog.tsx'
 import Field from '../components/Field.tsx'
 import PnlPreview from '../components/PnlPreview.tsx'
+import { EmptyState } from '../components/Screen.tsx'
+import { SearchIcon } from '../components/icons.tsx'
 import { chipClass, fieldA11y, inputClass } from '../components/styles.ts'
 import type { Side, Trade } from '../db/schema.ts'
 import { useSettings } from '../db/settings.ts'
@@ -47,7 +49,7 @@ function FormShell({
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-border bg-surface pt-[env(safe-area-inset-top)]">
-        <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center px-2">
+        <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center px-safe-2">
           <button
             type="button"
             onClick={onCancel}
@@ -89,9 +91,13 @@ function TradeForm() {
   if (id && trade === null) {
     return (
       <FormShell title="Edit trade" onCancel={goBack} saveDisabled>
-        <p className="m-4 rounded-xl border border-border bg-surface p-6 text-center text-muted">
-          This trade doesn't exist anymore. It may have been deleted.
-        </p>
+        <div className="px-safe pt-4">
+          <EmptyState
+            icon={<SearchIcon />}
+            title="Trade not found"
+            text="This trade doesn't exist anymore. It may have been deleted."
+          />
+        </div>
       </FormShell>
     )
   }
@@ -229,7 +235,7 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
         id="trade-form"
         noValidate
         onSubmit={onSubmit}
-        className="space-y-5 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]"
+        className="space-y-5 px-safe pt-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]"
       >
         {saveError && (
           <p

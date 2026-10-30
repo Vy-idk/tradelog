@@ -6,6 +6,7 @@ import Modal from '../components/Modal.tsx'
 import { PriceCell, PriceLabel, StaleLabel } from '../components/Price.tsx'
 import PullToRefresh from '../components/PullToRefresh.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
+import { WatchlistIcon } from '../components/icons.tsx'
 import { chipClass, fieldA11y, inputClass, pnlColor } from '../components/styles.ts'
 import {
   priceFailure,
@@ -776,7 +777,11 @@ function Watchlist() {
               </h2>
               <AddSymbolForm suggestions={suggestions} />
               {watchlist.length === 0 ? (
-                <EmptyState text="Add a symbol to follow its price." />
+                <EmptyState
+                  icon={<WatchlistIcon />}
+                  title="Nothing on your watchlist"
+                  text="Add a symbol above to follow its price and daily change."
+                />
               ) : (
                 <ul className="space-y-2">
                   {watchlist.map((item) => (

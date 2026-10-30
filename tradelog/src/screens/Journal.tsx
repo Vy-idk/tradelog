@@ -4,6 +4,8 @@ import BackupReminder from '../components/BackupReminder.tsx'
 import QuickCloseDialog from '../components/QuickCloseDialog.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
 import TradeRow from '../components/TradeRow.tsx'
+import { FilterIcon, JournalIcon } from '../components/icons.tsx'
+import { primaryActionClass, secondaryActionClass } from '../components/styles.ts'
 import { useLivePrices } from '../db/quotes.ts'
 import type { Trade } from '../db/schema.ts'
 import { useSettings } from '../db/settings.ts'
@@ -19,11 +21,14 @@ type FilterKey = keyof JournalFilters
 
 function FilterSelect({
   label,
+  plural,
   value,
   options,
   onChange,
 }: {
   label: string
+  /** For "All strategies" */
+  plural: string
   value: string
   options: string[]
   onChange: (value: string) => void
@@ -55,7 +60,7 @@ function FilterSelect({
         onChange={(e) => onChange(e.target.value)}
         className="absolute inset-0 cursor-pointer opacity-0"
       >
-        <option value="">All {label.toLowerCase()}s</option>
+        <option value="">All {plural}</option>
         {all.map((o) => (
           <option key={o} value={o}>
             {o}
@@ -143,24 +148,41 @@ function Journal() {
       <div ref={anchor} />
       <BackupReminder />
       {trades === undefined ? null : trades.length === 0 ? (
-        <EmptyState text="No trades yet. Tap + to log your first one." />
+        <EmptyState
+          icon={<JournalIcon />}
+          title="No trades yet"
+          text="Log your first trade and TradeLog works out your P&L, win rate and equity curve from there."
+          action={
+            <>
+              <Link to="/trade/new" className={primaryActionClass}>
+                Log a trade
+              </Link>
+              <Link to="/settings?focus=backup" className={secondaryActionClass}>
+                Restore a backup
+              </Link>
+            </>
+          }
+        />
       ) : (
         <>
           <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1">
             <FilterSelect
               label="Symbol"
+              plural="symbols"
               value={symbol}
               options={options.symbol}
               onChange={(v) => setFilter('symbol', v)}
             />
             <FilterSelect
               label="Strategy"
+              plural="strategies"
               value={strategy}
               options={options.strategy}
               onChange={(v) => setFilter('strategy', v)}
             />
             <FilterSelect
               label="Tag"
+              plural="tags"
               value={tag}
               options={options.tag}
               onChange={(v) => setFilter('tag', v)}
@@ -183,7 +205,11 @@ function Journal() {
           )}
 
           {shown.length === 0 ? (
-            <EmptyState text="No trades match these filters." />
+            <EmptyState
+              icon={<FilterIcon />}
+              title="No matching trades"
+              text="None of your trades match these filters. Try another symbol, strategy or tag."
+            />
           ) : (
             <ul className="space-y-2 pb-20">
               {shown.map((t) => (
@@ -204,7 +230,7 @@ function Journal() {
       <Link
         to="/trade/new"
         aria-label="Add trade"
-        className="fixed right-4 bottom-[calc(env(safe-area-inset-bottom)+5rem)] grid size-14 place-items-center rounded-full bg-accent text-bg shadow-lg shadow-black/40 active:scale-95"
+        className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(env(safe-area-inset-bottom)+5rem)] grid size-14 place-items-center rounded-full bg-accent text-bg shadow-lg shadow-black/40 active:scale-95"
       >
         <svg
           width="28"

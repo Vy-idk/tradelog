@@ -1,6 +1,10 @@
 export const inputClass =
   'block min-h-12 w-full rounded-lg border border-border bg-bg px-3 py-2.5 outline-none placeholder:text-muted/60 focus:border-accent aria-[invalid=true]:border-loss'
 
+/** Small buttons and links, e.g. an empty state's next step */
+export const primaryActionClass = 'rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-bg'
+export const secondaryActionClass = 'rounded-lg border border-border px-4 py-2.5 text-sm font-medium'
+
 export const chipClass =
   'rounded-full border px-3 py-1.5 text-sm border-border text-muted aria-pressed:border-accent aria-pressed:text-accent'
 

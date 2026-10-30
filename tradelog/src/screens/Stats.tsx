@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import { EquityChart, MonthlyPnlChart, StrategyBreakdown } from '../components/Charts.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
 import StatCard, { ChartCard } from '../components/StatCard.tsx'
-import { pnlColor } from '../components/styles.ts'
+import { StatsIcon } from '../components/icons.tsx'
+import { pnlColor, primaryActionClass } from '../components/styles.ts'
 import { useSettings } from '../db/settings.ts'
 import { useTrades } from '../db/trades.ts'
 import {
@@ -42,15 +43,31 @@ function Stats() {
   if (stats.closedCount === 0) {
     return (
       <Screen title="Stats">
-        <EmptyState
-          text={
-            stats.openCount === 0
-              ? "Stats will appear once you've closed a few trades."
-              : `Stats count closed trades only. Close ${
-                  stats.openCount === 1 ? 'your open trade' : `one of your ${stats.openCount} open trades`
-                } to see them here.`
-          }
-        />
+        {stats.openCount === 0 ? (
+          <EmptyState
+            icon={<StatsIcon />}
+            title="No stats yet"
+            text="Once you close a trade, this is where your P&L, win rate, profit factor and equity curve appear."
+            action={
+              <Link to="/trade/new" className={primaryActionClass}>
+                Log a trade
+              </Link>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<StatsIcon />}
+            title="Close a trade to see stats"
+            text={`Stats count closed trades only. Close ${
+              stats.openCount === 1 ? 'your open trade' : `one of your ${stats.openCount} open trades`
+            } to see them here.`}
+            action={
+              <Link to="/" className={primaryActionClass}>
+                Go to journal
+              </Link>
+            }
+          />
+        )}
       </Screen>
     )
   }

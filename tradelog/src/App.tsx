@@ -2,6 +2,7 @@ import { lazy, Suspense, useLayoutEffect, useRef } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import Screen from './components/Screen.tsx'
 import TabBar from './components/TabBar.tsx'
+import UpdateWhenIdle from './components/UpdateWhenIdle.tsx'
 import Journal from './screens/Journal.tsx'
 import Settings from './screens/Settings.tsx'
 import TradeForm from './screens/TradeForm.tsx'
@@ -21,8 +22,10 @@ function TabLayout() {
   }, [pathname])
 
   return (
-    <div className="flex h-full flex-col">
-      <main ref={main} className="flex-1 overflow-y-auto pt-[env(safe-area-inset-top)]">
+    // The notch padding sits outside the scroll area, so scrolled content
+    // never slides under the clock in the transparent status bar
+    <div className="flex h-full flex-col pt-[env(safe-area-inset-top)]">
+      <main ref={main} className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
       <TabBar />
@@ -32,25 +35,28 @@ function TabLayout() {
 
 function App() {
   return (
-    <Routes>
-      <Route element={<TabLayout />}>
-        <Route path="/" element={<Journal />} />
-        <Route
-          path="/stats"
-          element={
-            <Suspense fallback={<Screen title="Stats" />}>
-              <Stats />
-            </Suspense>
-          }
-        />
-        <Route path="/watchlist" element={<Watchlist />} />
-        <Route path="/settings" element={<Settings />} />
-      </Route>
-      {/* Full-screen form without the tab bar, which would float above the keyboard */}
-      <Route path="/trade/new" element={<TradeForm />} />
-      <Route path="/trade/:id" element={<TradeForm />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <UpdateWhenIdle />
+      <Routes>
+        <Route element={<TabLayout />}>
+          <Route path="/" element={<Journal />} />
+          <Route
+            path="/stats"
+            element={
+              <Suspense fallback={<Screen title="Stats" />}>
+                <Stats />
+              </Suspense>
+            }
+          />
+          <Route path="/watchlist" element={<Watchlist />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
+        {/* Full-screen form without the tab bar, which would float above the keyboard */}
+        <Route path="/trade/new" element={<TradeForm />} />
+        <Route path="/trade/:id" element={<TradeForm />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   )
 }
 

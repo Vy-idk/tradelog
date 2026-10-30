@@ -1,4 +1,12 @@
-import { useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Field from '../components/Field.tsx'
 import Modal from '../components/Modal.tsx'
@@ -26,6 +34,14 @@ import {
 import { formatDaysAgo, formatMoney, formatPrice } from '../lib/format.ts'
 import type { ExtendedResult } from '../lib/extended.ts'
 import type { QuoteResult } from '../lib/prices.ts'
+import {
+  appVersion,
+  checkForUpdate,
+  isStandalone,
+  usePwa,
+  type OfflineStatus,
+  type UpdateCheck,
+} from '../lib/pwa.ts'
 import { parseNumber } from '../lib/tradeDraft.ts'
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'ILS', 'CAD', 'AUD', 'CHF', 'JPY']
@@ -48,9 +64,9 @@ function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ id, title, children }: { id?: string; title: string; children: ReactNode }) {
   return (
-    <section className="mb-6">
+    <section id={id} className="mb-6 scroll-mt-4">
       <h2 className="mb-2 text-sm font-medium tracking-wide text-muted uppercase">{title}</h2>
       <div className="space-y-4 rounded-xl border border-border bg-surface p-4">{children}</div>
     </section>
@@ -742,8 +758,92 @@ function RestoreDialog({
   )
 }
 
+const offlineText: Record<OfflineStatus, string> = {
+  ready: 'Ready. TradeLog opens and saves trades without a connection.',
+  pending: 'Saving the app for offline use…',
+  dev: 'Off while developing; the deployed app works offline',
+  unsupported: "This browser can't run TradeLog offline",
+  failed: "Couldn't set up offline use. Reopen the app to try again.",
+}
+
+const checkText: Record<Exclude<UpdateCheck, 'idle' | 'checking'>, Status> = {
+  latest: { tone: 'ok', text: "You're on the latest version." },
+  downloading: { tone: 'ok', text: 'Downloading the new version…' },
+  offline: { tone: 'error', text: "You're offline. Connect to check for updates." },
+  failed: { tone: 'error', text: "Couldn't check for updates. Try again later." },
+}
+
+function AboutSettings() {
+  const { offline, updateReady, check } = usePwa()
+  const standalone = isStandalone()
+  const { version, commit, builtAt } = appVersion
+  const status: Status | null = updateReady
+    ? { tone: 'ok', text: 'New version ready. TradeLog restarts to switch to it.' }
+    : check === 'idle' || check === 'checking'
+      ? null
+      : checkText[check]
+
+  return (
+    <>
+      <div>
+        <p className="font-medium">TradeLog {version}</p>
+        <p className="mt-1 text-sm text-muted tabular-nums">
+          Built {dateTime.format(builtAt)}
+          {commit && ` · ${commit}`}
+        </p>
+      </div>
+
+      <dl className="space-y-3 text-sm">
+        <div>
+          <dt className="text-muted">Offline</dt>
+          <dd className={offline === 'failed' ? 'text-loss' : ''}>{offlineText[offline]}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Opened from</dt>
+          <dd>{standalone ? 'Home Screen' : 'A browser tab'}</dd>
+          {!standalone && (
+            <dd className="mt-1 text-xs text-muted">
+              On iPhone, open this page in Safari and tap Share → Add to Home Screen, then always
+              open TradeLog from its icon. A browser tab keeps a separate copy of your data, and
+              Safari can erase it after 7 days without a visit.
+            </dd>
+          )}
+        </div>
+      </dl>
+
+      <button
+        type="button"
+        onClick={() => checkForUpdate()}
+        disabled={
+          check === 'checking' || updateReady || offline === 'dev' || offline === 'unsupported'
+        }
+        className="w-full rounded-xl border border-border py-3 font-medium disabled:opacity-40"
+      >
+        {check === 'checking' ? 'Checking…' : 'Check for updates'}
+      </button>
+
+      {status && (
+        <p
+          role={status.tone === 'error' ? 'alert' : 'status'}
+          className={`text-sm ${status.tone === 'error' ? 'text-loss' : 'text-gain'}`}
+        >
+          {status.text}
+        </p>
+      )}
+    </>
+  )
+}
+
 function Settings() {
   const source = useBackupSource()
+  const [params] = useSearchParams()
+  const focusBackup = params.get('focus') === 'backup'
+  const loaded = source !== undefined
+
+  // "Restore a backup" on an empty journal lands on the Backup section
+  useEffect(() => {
+    if (loaded && focusBackup) document.getElementById('settings-backup')?.scrollIntoView()
+  }, [loaded, focusBackup])
 
   return (
     <Screen title="Settings">
@@ -758,8 +858,11 @@ function Settings() {
           <Section title="Pre-market and after hours">
             <RelaySettings settings={source.settings} />
           </Section>
-          <Section title="Backup">
+          <Section id="settings-backup" title="Backup">
             <BackupSettings source={source} />
+          </Section>
+          <Section title="About">
+            <AboutSettings />
           </Section>
         </>
       )}

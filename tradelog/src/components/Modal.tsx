@@ -29,7 +29,9 @@ function Modal({ open, onClose, title, children, align = 'center' }: Props) {
       // A click on the dialog element itself (not its content) is a backdrop click
       onClick={(e) => e.target === ref.current && onClose()}
       className={`mx-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-border bg-surface p-0 text-inherit backdrop:bg-black/60 ${
-        align === 'top' ? 'mt-[calc(env(safe-area-inset-top)+4rem)]' : 'my-auto'
+        align === 'top'
+          ? 'mt-[calc(env(safe-area-inset-top)+4rem)] max-h-[calc(100%-env(safe-area-inset-top)-env(safe-area-inset-bottom)-5rem)]'
+          : 'my-auto max-h-[calc(100%-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)]'
       }`}
     >
       {open && (
