@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { SideBadge } from '../components/Badges.tsx'
 import Field from '../components/Field.tsx'
 import Modal from '../components/Modal.tsx'
-import { PriceCell, StaleLabel } from '../components/Price.tsx'
+import { PriceCell, PriceLabel, StaleLabel } from '../components/Price.tsx'
 import PullToRefresh from '../components/PullToRefresh.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
 import { chipClass, fieldA11y, inputClass, pnlColor } from '../components/styles.ts'
@@ -27,6 +27,7 @@ import {
   formatSignedPrice,
 } from '../lib/format.ts'
 import { distinctSorted } from '../lib/journal.ts'
+import { priceSession, priceSessionLong } from '../lib/market.ts'
 import { isClosed, openPositions, unrealizedPnl, unrealizedReturnPct } from '../lib/pnl.ts'
 import { MANUAL_REFRESH_AGE, QUOTE_TTL, quoteErrorLong, type QuoteError } from '../lib/prices.ts'
 import { parseNumber } from '../lib/tradeDraft.ts'
@@ -237,7 +238,7 @@ function OpenPositionRow({
               {formatQuantity(trade.quantity)} @ {formatPrice(trade.entryPrice)}
               {quote && ` → ${formatPrice(quote.price)}`}
             </span>
-            {quote && <StaleLabel quote={quote} failure={failure} now={now} />}
+            {quote && <PriceLabel quote={quote} failure={failure} now={now} />}
           </p>
         </div>
         {pnl !== null ? (
@@ -521,7 +522,12 @@ function WatchItemDetails({
             <Stat label="Prev close" value={quote.prevClose} />
           </dl>
           <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-            {quote.priceTime > 0 && <span>Price from {formatClock(quote.priceTime)}</span>}
+            {quote.priceTime > 0 && (
+              <span>
+                {priceSessionLong[priceSession(quote.priceTime, now) ?? 'live']} from{' '}
+                {formatClock(quote.priceTime)}
+              </span>
+            )}
             <span>Checked {formatAge(quote.fetchedAt, now)}</span>
             <StaleLabel quote={quote} failure={failure} now={now} />
           </p>

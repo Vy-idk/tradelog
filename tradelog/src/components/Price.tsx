@@ -1,5 +1,6 @@
 import type { Quote } from '../db/schema.ts'
 import { formatClock, formatPrice, formatSignedPercent } from '../lib/format.ts'
+import { priceSession, priceSessionShort } from '../lib/market.ts'
 import { isStale, quoteErrorShort, type QuoteError } from '../lib/prices.ts'
 import { pnlColor } from './styles.ts'
 
@@ -25,8 +26,38 @@ export function StaleLabel({
 }
 
 /**
+ * The one label a row has room for: "Stale" when the price may be out of
+ * date, otherwise which session it's from (pre-market, after hours, or the
+ * close) unless it's a live regular-session price.
+ */
+export function PriceLabel({
+  quote,
+  failure,
+  now,
+}: {
+  quote: Quote
+  failure: QuoteError | undefined
+  now: number
+}) {
+  if (isStale(quote, failure, now)) return <StaleLabel quote={quote} failure={failure} now={now} />
+  const session = priceSession(quote.priceTime, now)
+  if (!session) return null
+  return (
+    <span
+      title={`Price from ${formatClock(quote.priceTime)}`}
+      className={`rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
+        session === 'close' ? 'bg-border text-muted' : 'bg-open/15 text-open'
+      }`}
+    >
+      {priceSessionShort[session]}
+    </span>
+  )
+}
+
+/**
  * Price and today's change for a list row, or what went wrong. A stale price
- * still shows, labelled with its time.
+ * still shows, labelled with its time; outside regular hours the label says
+ * which session the price is from.
  */
 export function PriceCell({
   quote,
@@ -50,7 +81,7 @@ export function PriceCell({
     <div className="flex shrink-0 flex-col items-end gap-0.5 tabular-nums">
       <span className="font-semibold">{formatPrice(quote.price)}</span>
       <span className="flex items-center gap-1.5">
-        <StaleLabel quote={quote} failure={failure} now={now} />
+        <PriceLabel quote={quote} failure={failure} now={now} />
         <span className={`text-sm ${pnlColor(quote.changePct)}`}>
           {formatSignedPercent(quote.changePct)}
         </span>
