@@ -20,6 +20,13 @@ export function parseIsoDate(value: string): Date {
   return new Date(y, m - 1, d)
 }
 
+/** Whole calendar days from one YYYY-MM-DD date to another; UTC keeps DST out of it. */
+export function daysBetween(start: string, end: string): number {
+  const [sy, sm, sd] = start.split('-').map(Number)
+  const [ey, em, ed] = end.split('-').map(Number)
+  return Math.round((Date.UTC(ey, em - 1, ed) - Date.UTC(sy, sm - 1, sd)) / 86_400_000)
+}
+
 /** Shifts a YYYY-MM-DD date by whole calendar days. */
 export function addDays(value: string, days: number): string {
   const date = parseIsoDate(value)

@@ -1,5 +1,5 @@
 import type { CashBalance, Settings, Trade } from '../db/schema.ts'
-import { isClosed, tradePnl } from './pnl.ts'
+import { isClosed, openPositions, tradePnl } from './pnl.ts'
 
 /** Trades are US-listed stocks and ETFs, so their prices and P&L are in dollars. */
 export const TRADE_CURRENCY = 'USD'
@@ -162,6 +162,8 @@ export function startingEquity(
   rates: FxRates | null | undefined,
 ): StartingEquity {
   if (settings.balanceMode === 'starting') {
+    // Zero is zero in any currency, so it needs no exchange rate
+    if (settings.startingBalance === 0) return { ok: true, value: 0 }
     const value = convert(
       settings.startingBalance,
       settings.startingBalanceCurrency,
@@ -186,4 +188,64 @@ export function startingEquity(
   )
   if (fromTrades === null) return { ok: false, missing: currency }
   return { ok: true, value: cash + fromTrades }
+}
+
+export type AccountValue = {
+  /** What the account is worth now, in the requested currency */
+  value: number
+  /** Cash today; null when the account is tracked from a starting balance */
+  cash: number | null
+  /** Open trades at current prices; shorts count against the account */
+  positions: number
+  /** Realized P&L of every closed trade */
+  realized: number
+  /** Unrealized P&L of the open trades that have a price, after fees */
+  unrealized: number
+  /** Open trades */
+  open: number
+  /** Open trades with a known price; the rest count at cost */
+  priced: number
+}
+
+/**
+ * The account as it stands now. From cash today: that cash plus open trades
+ * at current prices. From a starting balance: that balance plus everything
+ * realized and unrealized since. Null when an exchange rate is missing.
+ */
+export function accountValue(
+  settings: Pick<
+    Settings,
+    'balanceMode' | 'startingBalance' | 'startingBalanceCurrency' | 'cashBalances'
+  >,
+  trades: Trade[],
+  prices: ReadonlyMap<string, number>,
+  currency: string,
+  rates: FxRates | null | undefined,
+): AccountValue | null {
+  const rate = convert(1, TRADE_CURRENCY, currency, rates)
+  if (rate === null) return null
+
+  let inDollars = 0
+  for (const t of trades) {
+    if (isClosed(t)) continue
+    const price = prices.get(t.symbol) ?? t.entryPrice
+    inDollars += (t.side === 'long' ? 1 : -1) * price * t.quantity
+  }
+  const open = openPositions(trades, prices)
+  const totals = {
+    positions: inDollars * rate,
+    realized: realizedPnl(trades) * rate,
+    unrealized: open.unrealizedPnl * rate,
+    open: open.count,
+    priced: open.priced,
+  }
+
+  if (settings.balanceMode === 'current' && settings.cashBalances.length > 0) {
+    const cash = sumBalances(settings.cashBalances, currency, rates)
+    if (cash === null) return null
+    return { ...totals, value: cash + totals.positions, cash }
+  }
+  const start = startingEquity(settings, trades, currency, rates)
+  if (!start.ok) return null
+  return { ...totals, value: start.value + totals.realized + totals.unrealized, cash: null }
 }

@@ -13,13 +13,14 @@ import Field from '../components/Field.tsx'
 import PnlPreview from '../components/PnlPreview.tsx'
 import { EmptyState } from '../components/Screen.tsx'
 import { SearchIcon } from '../components/icons.tsx'
-import { chipClass, fieldA11y, inputClass } from '../components/styles.ts'
+import { blurWhenHidden, chipClass, fieldA11y, inputClass } from '../components/styles.ts'
 import type { Side, Trade } from '../db/schema.ts'
 import { useLoadedSettings } from '../db/settings.ts'
 import { checkSymbol } from '../db/symbols.ts'
 import { addTrade, deleteTrade, updateTrade, useTrade, useTrades } from '../db/trades.ts'
+import { useAmounts } from '../lib/amounts.ts'
 import { today } from '../lib/dates.ts'
-import { formatPrice, formatQuantity } from '../lib/format.ts'
+import { formatPrice } from '../lib/format.ts'
 import { TRADE_CURRENCY } from '../lib/fx.ts'
 import { journalScroll, strategySuggestions, tagSuggestions } from '../lib/journal.ts'
 import { uncheckedText, type SymbolCheck } from '../lib/symbols.ts'
@@ -62,7 +63,7 @@ function FormShell({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-border bg-surface pt-[env(safe-area-inset-top)]">
+      <header className="touch-none border-b border-border bg-surface pt-[env(safe-area-inset-top)]">
         <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center px-safe-2">
           <button
             type="button"
@@ -82,7 +83,9 @@ function FormShell({
           </button>
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto">{children}</div>
+      <div className="relative flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+        {children}
+      </div>
     </div>
   )
 }
@@ -120,6 +123,7 @@ function TradeForm() {
 
 function TradeFormBody({ trade }: { trade: Trade | null }) {
   const goBack = useGoBack()
+  const amounts = useAmounts()
   const apiKey = useLoadedSettings()?.finnhubApiKey
   const trades = useTrades()
   const isNew = trade === null
@@ -364,7 +368,7 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
           <Field id={fieldId('quantity')} label="Quantity" error={errors.quantity}>
             <input
               {...fieldA11y(fieldId('quantity'), errors.quantity)}
-              className={inputClass}
+              className={`${inputClass} ${blurWhenHidden(amounts.hidden)}`}
               value={draft.quantity}
               onChange={(e) => set('quantity', e.target.value)}
               autoFocus={isNew && Boolean(presetSymbol)}
@@ -399,7 +403,7 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
           <Field id={fieldId('fees')} label="Fees" error={errors.fees} hint="Round trip total">
             <input
               {...fieldA11y(fieldId('fees'), errors.fees)}
-              className={inputClass}
+              className={`${inputClass} ${blurWhenHidden(amounts.hidden)}`}
               value={draft.fees}
               onChange={(e) => set('fees', e.target.value)}
               inputMode="decimal"
@@ -587,7 +591,7 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
       >
         {trade && (
           <p>
-            {trade.symbol} {trade.side} · {formatQuantity(trade.quantity)} @{' '}
+            {trade.symbol} {trade.side} · {amounts.quantity(trade.quantity)} @{' '}
             {formatPrice(trade.entryPrice)}. This can't be undone.
           </p>
         )}

@@ -11,7 +11,7 @@ import { useSearchParams } from 'react-router-dom'
 import Field from '../components/Field.tsx'
 import Modal from '../components/Modal.tsx'
 import Screen from '../components/Screen.tsx'
-import { fieldA11y, inputClass } from '../components/styles.ts'
+import { blurWhenHidden, fieldA11y, inputClass } from '../components/styles.ts'
 import {
   exportJsonBackup,
   exportTradesCsv,
@@ -19,6 +19,7 @@ import {
   useBackupSource,
   type SaveOutcome,
 } from '../db/backup.ts'
+import { forgetEarningsRefusals } from '../db/earnings.ts'
 import { useFxRates, useFxRefresh } from '../db/fx.ts'
 import { testApiKey, testRelay } from '../db/quotes.ts'
 import type { Settings as AppSettings, CashBalance } from '../db/schema.ts'
@@ -32,7 +33,8 @@ import {
   type ImportMode,
   type ParseResult,
 } from '../lib/backup.ts'
-import { formatDaysAgo, formatMoney, formatPrice } from '../lib/format.ts'
+import { useAmounts } from '../lib/amounts.ts'
+import { formatDaysAgo, formatPrice } from '../lib/format.ts'
 import type { ExtendedResult } from '../lib/extended.ts'
 import { accountCurrencies, FX_CURRENCIES, sumBalances, type FxRates } from '../lib/fx.ts'
 import { newId } from '../lib/id.ts'
@@ -165,6 +167,7 @@ function AccountSettings({ settings }: { settings: AppSettings }) {
 
 function StartingBalance({ settings }: { settings: AppSettings }) {
   const { startingBalance, startingBalanceCurrency } = settings
+  const amounts = useAmounts()
   const [balance, setBalance] = useState(balanceText(startingBalance))
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
@@ -194,14 +197,14 @@ function StartingBalance({ settings }: { settings: AppSettings }) {
         error={error}
         hint={
           saved
-            ? `Saved: ${formatMoney(startingBalance, startingBalanceCurrency)}`
+            ? `Saved: ${amounts.money(startingBalance, startingBalanceCurrency)}`
             : 'Account value before your first logged trade; the equity curve starts here'
         }
       >
         <div className="flex gap-2">
           <input
             {...fieldA11y('settings-balance', error || undefined)}
-            className={`${inputClass} flex-1`}
+            className={`${inputClass} flex-1 ${blurWhenHidden(amounts.hidden)}`}
             value={balance}
             onChange={(e) => {
               setBalance(e.target.value)
@@ -231,13 +234,15 @@ function StartingBalance({ settings }: { settings: AppSettings }) {
 
 function CashBalances({ settings, rates }: { settings: AppSettings; rates: FxRates | null }) {
   const { cashBalances, currency } = settings
+  const amounts = useAmounts()
   const total = sumBalances(cashBalances, currency, rates)
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">
-        The cash in your account today, in any currency. TradeLog adds your open trades at cost and
-        works back through your closed trades to where you started.
+        The cash in your account today, in any currency. TradeLog adds your open trades at current
+        prices for your account value, and works back through your closed trades to where you
+        started.
       </p>
       {cashBalances.length > 0 && (
         <ul className="space-y-3">
@@ -279,7 +284,7 @@ function CashBalances({ settings, rates }: { settings: AppSettings; rates: FxRat
           Total:{' '}
           {total === null
             ? 'needs exchange rates, which load when you’re online'
-            : `${formatMoney(total, currency)} at today’s rates`}
+            : `${amounts.money(total, currency)} at today’s rates`}
         </p>
       )}
     </div>
@@ -298,6 +303,7 @@ function CashBalanceRow({
   onRemove: () => void
 }) {
   const id = `settings-cash-${index}`
+  const { hidden } = useAmounts()
   const [label, setLabel] = useState(balance.label)
   const [amount, setAmount] = useState(balanceText(balance.amount))
   const [error, setError] = useState('')
@@ -354,7 +360,7 @@ ${balance.amount}`
         </label>
         <input
           {...fieldA11y(id, error || undefined)}
-          className={`${inputClass} flex-1`}
+          className={`${inputClass} flex-1 ${blurWhenHidden(hidden)}`}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           onBlur={saveText}
@@ -442,7 +448,10 @@ function PriceSettings({ settings }: { settings: AppSettings }) {
     if (/\s/.test(trimmed)) return setError("API keys don't contain spaces")
     if (trimmed.length > 100) return setError("That's too long for an API key")
     setError('')
-    if (changed) await updateSettings({ finnhubApiKey: trimmed })
+    if (changed) {
+      await updateSettings({ finnhubApiKey: trimmed })
+      await forgetEarningsRefusals()
+    }
     setKey(trimmed)
     if (!trimmed) {
       setStatus(finnhubApiKey ? { tone: 'ok', text: 'API key removed. Prices are off.' } : null)

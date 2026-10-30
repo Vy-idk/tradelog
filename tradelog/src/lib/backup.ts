@@ -94,6 +94,10 @@ function readTrade(raw: unknown, now: number): Trade {
   if (!Array.isArray(tags) || !tags.every((t) => typeof t === 'string'))
     throw new FieldError('tags must be a list of text')
 
+  const { partOf } = raw
+  if (partOf !== undefined && partOf !== null && typeof partOf !== 'string')
+    throw new FieldError("partOf isn't text")
+
   const createdAt = isNumber(raw.createdAt) ? raw.createdAt : now
   return {
     id,
@@ -108,6 +112,7 @@ function readTrade(raw: unknown, now: number): Trade {
     strategy: optionalString(raw, 'strategy').trim(),
     tags: [...new Set(tags.map((t) => t.trim()).filter(Boolean))],
     notes: optionalString(raw, 'notes'),
+    ...(partOf ? { partOf } : {}),
     createdAt,
     updatedAt: isNumber(raw.updatedAt) ? raw.updatedAt : createdAt,
   }
@@ -297,8 +302,10 @@ export type ImportPlan = {
 
 /**
  * What a restore will do. Merge adds trades this device doesn't have and
- * updates ones the backup has a newer edit of; nothing is deleted. Replace
- * makes the journal and watchlist exactly match the backup.
+ * updates ones the backup has a newer edit of; nothing is deleted. The closed
+ * part of a partial close is left out when this device changed the open trade
+ * since: those shares may be back in it, and adding them would count them
+ * twice. Replace makes the journal and watchlist exactly match the backup.
  */
 export function planImport(
   existing: Pick<BackupSource, 'trades' | 'watchlist'>,
@@ -335,8 +342,11 @@ export function planImport(
   let updated = 0
   for (const t of backup.trades) {
     const mine = current.get(t.id)
-    if (!mine) added++
-    else if (t.updatedAt > mine.updatedAt) updated++
+    if (!mine) {
+      const openPart = t.partOf ? current.get(t.partOf) : undefined
+      if (openPart && openPart.updatedAt > t.updatedAt) continue
+      added++
+    } else if (t.updatedAt > mine.updatedAt) updated++
     else continue
     trades.push(t)
   }

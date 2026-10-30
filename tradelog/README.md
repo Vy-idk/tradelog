@@ -4,13 +4,18 @@ A personal trading journal and price tracker that installs on an iPhone from
 Safari as a Progressive Web App. It costs nothing to run, works offline, and
 keeps your data on your device.
 
-- **Journal:** log a trade in seconds, edit it, close it at the current price,
-  and filter by symbol, strategy or tag.
-- **Stats:** total P&L, win rate, average win and loss, profit factor, equity
-  curve, and P&L by month and by strategy.
-- **Watchlist:** prices and daily change from Finnhub's free plan, unrealized
-  P&L on open trades, and optional pre-market and after-hours prices through
-  the [price relay](relay/README.md).
+- **Journal:** log a trade in seconds, edit it, close all or part of it at the
+  current price, and filter by symbol, strategy or tag.
+- **Stats:** your account value at current prices, then total P&L, win rate,
+  average win and loss, profit factor, max drawdown, streaks, holding time,
+  equity curve, and P&L by month, strategy, symbol, tag, side and weekday, for
+  any period.
+- **Watchlist:** prices and daily change from Finnhub's free plan, open trades
+  grouped into positions with their unrealized P&L, upcoming earnings dates,
+  and optional pre-market and after-hours prices through the
+  [price relay](relay/README.md).
+- **Hide amounts:** the eye button masks money and share counts on every
+  screen, for using the app around other people.
 - **Backup:** JSON export and restore, a CSV of your trades, and a reminder
   when your last backup is over a week old.
 
@@ -86,7 +91,11 @@ Before tagging a release, run through these on the iPhone:
 - Installs from Safari and opens full screen with the right icon and a dark
   launch screen
 - Content clears the notch and home indicator, upright and turned sideways
+- Dragging past the end of a list, or on the tab bar, leaves the page in place
 - Add, edit, close and delete a trade
+- Close part of a trade: the rest stays open, and Stats count the closed part
+- Hide amounts: no money or share counts show anywhere, and it stays on after
+  a restart
 - Number keypad on price fields, and no zoom when a field is focused
 - Airplane mode: the app opens, the journal works, prices show "Stale"
 - Force-quit and reopen: data is still there

@@ -53,6 +53,11 @@ export function formatPrice(value: number): string {
   return priceFormat.format(value)
 }
 
+/** An average entry: a worked-out number, so cents are enough above a dollar. */
+export function formatAveragePrice(value: number): string {
+  return priceFormat.format(value < 1 ? value : Math.round(value * 100) / 100)
+}
+
 /** A price change with its sign, e.g. +1.25 or −0.40 */
 export function formatSignedPrice(value: number): string {
   const abs = priceFormat.format(Math.abs(value))
@@ -172,6 +177,20 @@ export function formatMonth(month: string, style: 'short' | 'year' | 'long' = 's
   if (style === 'long') return monthLong.format(date)
   const name = monthShort.format(date)
   return style === 'year' ? `${name} '${String(y).slice(2)}` : name
+}
+
+const daysFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 })
+
+/** An average number of days, e.g. "4.2 days", "1 day" or "Same day". */
+export function formatDays(days: number): string {
+  if (days < 0.05) return 'Same day'
+  const text = daysFormat.format(days)
+  return `${text} ${text === '1' ? 'day' : 'days'}`
+}
+
+/** The same for a tight spot: "4.2d". */
+export function formatDaysShort(days: number): string {
+  return `${daysFormat.format(days)}d`
 }
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()

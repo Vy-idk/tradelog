@@ -52,6 +52,7 @@ describe('createBackup and parseBackup', () => {
       trade(),
       trade({ id: 'id-2', symbol: 'TSLA', side: 'short', exitPrice: null, exitDate: null }),
       trade({ id: 'id-3', quantity: 0.00012345, entryPrice: 61234.5, tags: [], notes: '' }),
+      trade({ id: 'id-4', partOf: 'id-2' }),
     ]
     const watchlist = [
       { symbol: 'NVDA', addedAt: 5, targetPrice: 150, note: 'earnings' },
@@ -229,6 +230,38 @@ describe('planImport', () => {
     expect(plan).toMatchObject({ added: 1, updated: 1, unchanged: 2, removed: 0 })
     expect(plan.watchlist.map((w) => w.symbol)).toEqual(['NVDA'])
     expect(plan.watchlistAdded).toBe(1)
+  })
+
+  describe('the closed part of a partial close', () => {
+    const open = trade({ id: 'open', quantity: 60, exitPrice: null, exitDate: null, updatedAt: 5 })
+    const part = trade({ id: 'part', quantity: 40, partOf: 'open', updatedAt: 5 })
+
+    it("isn't added when the open trade changed here since, so shares can't double", () => {
+      const merged = { ...open, quantity: 100, updatedAt: 9 }
+      const plan = planImport(
+        { trades: [merged], watchlist: [] },
+        backupWith([open, part]),
+        'merge',
+      )
+      expect(plan.trades).toEqual([])
+      expect(plan).toMatchObject({ added: 0, updated: 0, unchanged: 2 })
+    })
+
+    it('comes in with its open trade when this device has neither', () => {
+      const plan = planImport({ trades: [], watchlist: [] }, backupWith([open, part]), 'merge')
+      expect(plan.trades.map((t) => t.id)).toEqual(['open', 'part'])
+    })
+
+    it('comes in when this device still has the trade from before the split', () => {
+      const before = { ...open, quantity: 100, updatedAt: 3 }
+      const plan = planImport(
+        { trades: [before], watchlist: [] },
+        backupWith([open, part]),
+        'merge',
+      )
+      expect(plan.trades.map((t) => t.id)).toEqual(['open', 'part'])
+      expect(plan).toMatchObject({ added: 1, updated: 1 })
+    })
   })
 
   it('replace takes the backup as is and counts what goes away', () => {

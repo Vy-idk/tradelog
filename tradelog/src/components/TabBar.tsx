@@ -13,7 +13,7 @@ const tabs: Tab[] = [
 
 function TabBar() {
   return (
-    <nav className="border-t border-border bg-surface px-safe-0 pb-[env(safe-area-inset-bottom)]">
+    <nav className="touch-none border-t border-border bg-surface px-safe-0 pb-[env(safe-area-inset-bottom)]">
       <ul className="flex">
         {tabs.map((tab) => (
           <li key={tab.to} className="flex-1">

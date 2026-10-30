@@ -1,4 +1,5 @@
-import type { Trade } from '../db/schema.ts'
+import type { StatsRange, Trade } from '../db/schema.ts'
+import { addDays, daysBetween, parseIsoDate } from './dates.ts'
 
 type PnlFields = Pick<Trade, 'side' | 'quantity' | 'entryPrice' | 'exitPrice' | 'fees'>
 
@@ -153,6 +154,117 @@ export function dailyEquity(points: EquityPoint[]): { date: string; equity: numb
   return days
 }
 
+/** First day a Stats range covers, or null for all time. */
+export function rangeStart(range: StatsRange, today: string): string | null {
+  switch (range) {
+    case '30d':
+      return addDays(today, -29)
+    case '90d':
+      return addDays(today, -89)
+    case 'ytd':
+      return `${today.slice(0, 4)}-01-01`
+    case '1y':
+      return addDays(today, -364)
+    case 'all':
+      return null
+  }
+}
+
+/** Trades closed on or after `from`, plus every open trade. */
+export function closedSince(trades: Trade[], from: string | null): Trade[] {
+  if (from === null) return trades
+  return trades.filter((t) => !isClosed(t) || exitDay(t) >= from)
+}
+
+/**
+ * The part of an equity curve from `from` on, and the equity it starts at:
+ * what everything before that date had already built up to.
+ */
+export function equitySince(
+  points: EquityPoint[],
+  start: number,
+  from: string | null,
+): { points: EquityPoint[]; start: number } {
+  if (from === null) return { points, start }
+  const first = points.findIndex((p) => p.date >= from)
+  if (first === -1) return { points: [], start: points.at(-1)?.equity ?? start }
+  return { points: points.slice(first), start: first > 0 ? points[first - 1].equity : start }
+}
+
+export type Drawdown = {
+  /** Largest fall from a peak, as a negative amount; 0 if equity never fell */
+  amount: number
+  /** That fall as a percentage of the peak; null when the peak wasn't above zero */
+  pct: number | null
+  /** Null when the peak was the curve's starting value */
+  peakDate: string | null
+  troughDate: string | null
+}
+
+/** Largest peak-to-trough fall in end-of-day realized equity. */
+export function maxDrawdown(points: EquityPoint[], start: number): Drawdown {
+  let peak = start
+  let peakDate: string | null = null
+  let worst: Drawdown = { amount: 0, pct: null, peakDate: null, troughDate: null }
+  for (const { date, equity } of dailyEquity(points)) {
+    if (equity > peak) {
+      peak = equity
+      peakDate = date
+    } else if (equity - peak < worst.amount) {
+      const amount = equity - peak
+      worst = { amount, pct: peak > 0 ? (amount / peak) * 100 : null, peakDate, troughDate: date }
+    }
+  }
+  return worst
+}
+
+export type Streaks = {
+  longestWin: number
+  longestLoss: number
+  /** Positive for wins in a row, negative for losses, 0 with neither */
+  current: number
+}
+
+/** Runs of wins and losses in exit order. Break-even trades don't end a run. */
+export function streaks(trades: Trade[]): Streaks {
+  let longestWin = 0
+  let longestLoss = 0
+  let current = 0
+  for (const { pnl } of closedByExit(trades)) {
+    if (pnl >= BREAKEVEN) {
+      current = current > 0 ? current + 1 : 1
+      longestWin = Math.max(longestWin, current)
+    } else if (pnl <= -BREAKEVEN) {
+      current = current < 0 ? current - 1 : -1
+      longestLoss = Math.max(longestLoss, -current)
+    }
+  }
+  return { longestWin, longestLoss, current }
+}
+
+export type Holding = {
+  /** Average calendar days from entry to exit; null with no such trades */
+  all: number | null
+  wins: number | null
+  losses: number | null
+}
+
+const mean = (values: number[]) =>
+  values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null
+
+/** How long closed trades were held, overall and for winners and losers apart. */
+export function holdingDays(trades: Trade[]): Holding {
+  const closed = closedByExit(trades).map((t) => ({
+    pnl: t.pnl,
+    days: daysBetween(t.entryDate, exitDay(t)),
+  }))
+  return {
+    all: mean(closed.map((t) => t.days)),
+    wins: mean(closed.filter((t) => t.pnl >= BREAKEVEN).map((t) => t.days)),
+    losses: mean(closed.filter((t) => t.pnl <= -BREAKEVEN).map((t) => t.days)),
+  }
+}
+
 export type PeriodPnl = {
   /** YYYY-MM */
   month: string
@@ -188,26 +300,59 @@ export function pnlByMonth(trades: Trade[]): PeriodPnl[] {
   return filled
 }
 
-export type StrategyPnl = {
-  /** Blank for trades without a strategy */
-  strategy: string
+export type PnlRow = {
+  /** What the row groups by; blank for trades without a strategy or tag */
+  key: string
   pnl: number
   count: number
   wins: number
 }
 
-/** Realized P&L per strategy, best first. */
-export function pnlByStrategy(trades: Trade[]): StrategyPnl[] {
-  const totals = new Map<string, StrategyPnl>()
+/** Totals closed trades under each key they belong to. */
+function pnlBy(trades: Trade[], keysOf: (t: ClosedTrade) => string[]): PnlRow[] {
+  const totals = new Map<string, PnlRow>()
   for (const t of closedByExit(trades)) {
-    const row = totals.get(t.strategy) ?? { strategy: t.strategy, pnl: 0, count: 0, wins: 0 }
-    row.pnl += t.pnl
-    row.count++
-    if (t.pnl >= BREAKEVEN) row.wins++
-    totals.set(t.strategy, row)
+    for (const key of keysOf(t)) {
+      const row = totals.get(key) ?? { key, pnl: 0, count: 0, wins: 0 }
+      row.pnl += t.pnl
+      row.count++
+      if (t.pnl >= BREAKEVEN) row.wins++
+      totals.set(key, row)
+    }
   }
-  return [...totals.values()].sort(
-    (a, b) => b.pnl - a.pnl || b.count - a.count || a.strategy.localeCompare(b.strategy),
+  return [...totals.values()]
+}
+
+const bestFirst = (a: PnlRow, b: PnlRow) =>
+  b.pnl - a.pnl || b.count - a.count || a.key.localeCompare(b.key)
+
+/** Realized P&L per strategy, best first. */
+export function pnlByStrategy(trades: Trade[]): PnlRow[] {
+  return pnlBy(trades, (t) => [t.strategy]).sort(bestFirst)
+}
+
+/** Realized P&L per symbol, biggest gain or loss first, so a short list shows both ends. */
+export function pnlBySymbol(trades: Trade[]): PnlRow[] {
+  return pnlBy(trades, (t) => [t.symbol]).sort(
+    (a, b) => Math.abs(b.pnl) - Math.abs(a.pnl) || bestFirst(a, b),
+  )
+}
+
+/** Realized P&L per tag, best first. A trade with several tags counts under each. */
+export function pnlByTag(trades: Trade[]): PnlRow[] {
+  return pnlBy(trades, (t) => (t.tags.length ? t.tags : [''])).sort(bestFirst)
+}
+
+/** Realized P&L for longs and shorts, best first. */
+export function pnlBySide(trades: Trade[]): PnlRow[] {
+  return pnlBy(trades, (t) => [t.side]).sort(bestFirst)
+}
+
+/** Realized P&L per weekday of the exit, Monday first. Keys are Date.getDay() values. */
+export function pnlByWeekday(trades: Trade[]): PnlRow[] {
+  const mondayFirst = (row: PnlRow) => (Number(row.key) + 6) % 7
+  return pnlBy(trades, (t) => [String(parseIsoDate(exitDay(t)).getDay())]).sort(
+    (a, b) => mondayFirst(a) - mondayFirst(b),
   )
 }
 

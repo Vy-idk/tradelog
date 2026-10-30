@@ -1,14 +1,8 @@
 import { Link } from 'react-router-dom'
 import type { Trade } from '../db/schema.ts'
+import { useAmounts } from '../lib/amounts.ts'
 import type { LivePrice } from '../lib/extended.ts'
-import {
-  formatClock,
-  formatDateRange,
-  formatPrice,
-  formatQuantity,
-  formatSignedMoney,
-  formatSignedPercent,
-} from '../lib/format.ts'
+import { formatClock, formatDateRange, formatPrice, formatSignedPercent } from '../lib/format.ts'
 import { priceSessionShort } from '../lib/market.ts'
 import { isClosed, returnPct, tradePnl, unrealizedPnl } from '../lib/pnl.ts'
 import { SideBadge, StatusBadge } from './Badges.tsx'
@@ -25,6 +19,7 @@ type Props = {
 }
 
 function TradeRow({ trade, currency, live, liveStale, onQuickClose }: Props) {
+  const amounts = useAmounts()
   const closed = isClosed(trade)
   const pnl = tradePnl(trade)
   const pct = returnPct(trade)
@@ -33,6 +28,7 @@ function TradeRow({ trade, currency, live, liveStale, onQuickClose }: Props) {
   // Entry → exit date, then strategy and tags
   const details = [
     formatDateRange(trade.entryDate, trade.exitDate),
+    trade.partOf && 'Partial close',
     trade.strategy,
     trade.tags.map((t) => `#${t}`).join(' '),
   ]
@@ -52,14 +48,14 @@ function TradeRow({ trade, currency, live, liveStale, onQuickClose }: Props) {
             <StatusBadge open={!closed} />
           </div>
           <p className="mt-0.5 truncate text-sm text-muted tabular-nums">
-            {formatQuantity(trade.quantity)} @ {formatPrice(trade.entryPrice)}
+            {amounts.quantity(trade.quantity)} @ {formatPrice(trade.entryPrice)}
             {closed && ` → ${formatPrice(trade.exitPrice)}`}
           </p>
           <p className="mt-0.5 truncate text-xs text-muted">{details}</p>
         </div>
         {pnl !== null && (
           <div className="shrink-0 text-right tabular-nums">
-            <p className={`font-semibold ${pnlColor(pnl)}`}>{formatSignedMoney(pnl, currency)}</p>
+            <p className={`font-semibold ${pnlColor(pnl)}`}>{amounts.signedMoney(pnl, currency)}</p>
             {pct !== null && (
               <p className={`text-xs ${pnlColor(pnl)}`}>{formatSignedPercent(pct)}</p>
             )}
@@ -68,7 +64,7 @@ function TradeRow({ trade, currency, live, liveStale, onQuickClose }: Props) {
         {unrealized !== null && live && (
           <div className="shrink-0 text-right tabular-nums">
             <p className={`font-medium ${pnlColor(unrealized)}`}>
-              {formatSignedMoney(unrealized, currency)}
+              {amounts.signedMoney(unrealized, currency)}
             </p>
             {liveStale ? (
               <p className="text-xs text-amber-300">as of {formatClock(live.fetchedAt)}</p>

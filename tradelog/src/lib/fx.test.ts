@@ -3,6 +3,7 @@ import type { Trade } from '../db/schema.ts'
 import { DEFAULT_SETTINGS } from '../db/settings.ts'
 import {
   accountCurrencies,
+  accountValue,
   convert,
   openCost,
   parseFxRates,
@@ -125,9 +126,94 @@ describe('startingEquity', () => {
     expect(startingEquity(settings, [closed], 'USD', null)).toEqual({ ok: false, missing: 'ILS' })
   })
 
+  it('needs no exchange rate for a starting balance of zero', () => {
+    const settings = { ...DEFAULT_SETTINGS, startingBalanceCurrency: 'ILS' }
+    expect(startingEquity(settings, [closed], 'USD', null)).toEqual({ ok: true, value: 0 })
+  })
+
   it('starts at zero before any cash is entered', () => {
     const settings = { ...DEFAULT_SETTINGS, balanceMode: 'current' as const }
     expect(startingEquity(settings, [closed], 'USD', null)).toEqual({ ok: true, value: 0 })
+  })
+})
+
+describe('accountValue', () => {
+  const closed = trade() // +468.56 realized
+  const open = trade({
+    id: 'open',
+    symbol: 'VRT',
+    exitPrice: null,
+    exitDate: null,
+    quantity: 10,
+    entryPrice: 50,
+    fees: 2,
+  })
+  const short = trade({
+    id: 'short',
+    symbol: 'TSLA',
+    side: 'short',
+    exitPrice: null,
+    exitDate: null,
+    quantity: 2,
+    entryPrice: 100,
+  })
+  const prices = new Map([
+    ['VRT', 40],
+    ['TSLA', 90],
+  ])
+  const cash = {
+    ...DEFAULT_SETTINGS,
+    balanceMode: 'current' as const,
+    cashBalances: [
+      { id: 'a', label: '', amount: 5_000, currency: 'USD' },
+      { id: 'b', label: '', amount: 3_500, currency: 'ILS' },
+    ],
+  }
+
+  it('adds open trades at current prices to the cash held, shorts against it', () => {
+    const value = accountValue(cash, [closed, open, short], prices, 'USD', rates)!
+    expect(value.cash).toBeCloseTo(6_000)
+    expect(value.positions).toBe(400 - 180)
+    expect(value.value).toBeCloseTo(6_000 + 220)
+    expect(value).toMatchObject({ open: 2, priced: 2, unrealized: -100 - 2 + 20 })
+  })
+
+  it('adds everything since to a starting balance', () => {
+    const settings = { ...DEFAULT_SETTINGS, startingBalance: 10_000 }
+    const value = accountValue(settings, [closed, open, short], prices, 'USD', rates)!
+    expect(value.cash).toBeNull()
+    expect(value.realized).toBeCloseTo(468.56)
+    expect(value.value).toBeCloseTo(10_000 + 468.56 - 82)
+  })
+
+  it('counts a trade without a price at cost', () => {
+    const value = accountValue(cash, [open], new Map(), 'USD', rates)!
+    expect(value).toMatchObject({ positions: 500, unrealized: 0, open: 1, priced: 0 })
+    expect(value.value).toBeCloseTo(6_500)
+  })
+
+  it('needs no open trades', () => {
+    const value = accountValue(cash, [closed], new Map(), 'USD', rates)!
+    expect(value).toMatchObject({ positions: 0, open: 0 })
+    expect(value.value).toBeCloseTo(6_000)
+  })
+
+  it('converts everything into the requested currency', () => {
+    const value = accountValue(cash, [closed, open, short], prices, 'ILS', rates)!
+    expect(value.value).toBeCloseTo((6_000 + 220) * 3.5)
+    expect(value.unrealized).toBeCloseTo(-82 * 3.5)
+  })
+
+  it('is null without the exchange rate it needs', () => {
+    expect(accountValue(cash, [open], prices, 'USD', null)).toBeNull()
+    expect(accountValue(DEFAULT_SETTINGS, [open], prices, 'ILS', null)).toBeNull()
+  })
+
+  it('agrees with the equity curve start in both modes', () => {
+    const settings = { ...DEFAULT_SETTINGS, startingBalance: 1_000 }
+    const start = startingEquity(settings, [closed], 'USD', rates)
+    const value = accountValue(settings, [closed], new Map(), 'USD', rates)!
+    expect(start.ok && start.value + 468.56).toBeCloseTo(value.value)
   })
 })
 

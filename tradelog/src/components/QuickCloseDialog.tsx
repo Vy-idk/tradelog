@@ -3,16 +3,18 @@ import { priceFailure, refreshQuotes, useLivePrices, usePriceStatus } from '../d
 import type { Trade } from '../db/schema.ts'
 import { useSettings } from '../db/settings.ts'
 import { closeTrade } from '../db/trades.ts'
+import { useAmounts } from '../lib/amounts.ts'
 import { today } from '../lib/dates.ts'
-import { formatAge, formatPrice, formatQuantity } from '../lib/format.ts'
+import { formatAge, formatPrice } from '../lib/format.ts'
 import { isStale } from '../lib/prices.ts'
-import { draftFromTrade, validateDraft } from '../lib/tradeDraft.ts'
+import { feeShare, sharesLeft } from '../lib/positions.ts'
+import { draftFromTrade, parseNumber, validateDraft } from '../lib/tradeDraft.ts'
 import { useNow } from '../lib/useNow.ts'
 import { useOnline } from '../lib/useOnline.ts'
 import Field from './Field.tsx'
 import Modal from './Modal.tsx'
 import PnlPreview from './PnlPreview.tsx'
-import { chipClass, fieldA11y, inputClass } from './styles.ts'
+import { blurWhenHidden, chipClass, fieldA11y, inputClass } from './styles.ts'
 
 type Props = {
   /** The open trade to close; null hides the dialog */
@@ -40,9 +42,12 @@ function QuickCloseForm({
   currency: string
   onDone: () => void
 }) {
+  const amounts = useAmounts()
   const [exitPrice, setExitPrice] = useState('')
   const [exitDate, setExitDate] = useState(today())
-  const [fees, setFees] = useState(() => draftFromTrade(trade).fees)
+  const [quantity, setQuantity] = useState(() => draftFromTrade(trade).quantity)
+  /** Fees as typed; until then they follow the share of the trade being closed */
+  const [typedFees, setTypedFees] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -63,19 +68,31 @@ function QuickCloseForm({
   const sessionText =
     quote?.session === 'pre' ? ' pre-market' : quote?.session === 'post' ? ' after-hours' : ''
 
+  const closing = parseNumber(quantity) ?? 0
+  const left = sharesLeft(trade.quantity, closing)
+  const partial = closing > 0 && left > 0
+  const fees =
+    typedFees ??
+    (partial && trade.fees > 0
+      ? String(feeShare(trade.fees, closing, trade.quantity))
+      : draftFromTrade(trade).fees)
+
   // Reuse the full trade validation so the rules match the edit form exactly
-  const result = validateDraft({ ...draftFromTrade(trade), exitPrice, exitDate, fees })
+  const result = validateDraft({ ...draftFromTrade(trade), quantity, exitPrice, exitDate, fees })
   const errors = result.ok ? {} : result.errors
   const exitPriceError = exitPrice.trim() === '' ? 'Exit price is required' : errors.exitPrice
+  const quantityError =
+    errors.quantity ??
+    (closing > trade.quantity ? `This trade holds ${amounts.quantity(trade.quantity)}` : undefined)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setSubmitted(true)
-    if (!result.ok || saving) return
+    if (!result.ok || quantityError || saving) return
     setSaving(true)
     try {
-      const { exitPrice, exitDate, fees } = result.value
-      await closeTrade(trade.id, { exitPrice: exitPrice!, exitDate: exitDate!, fees })
+      const { quantity, exitPrice, exitDate, fees } = result.value
+      await closeTrade(trade.id, { quantity, exitPrice: exitPrice!, exitDate: exitDate!, fees })
       onDone()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -86,7 +103,7 @@ function QuickCloseForm({
   return (
     <form noValidate onSubmit={onSubmit} className="space-y-4">
       <p className="-mt-1 text-sm text-muted">
-        {trade.symbol} {trade.side} · {formatQuantity(trade.quantity)} @{' '}
+        {trade.symbol} {trade.side} · {amounts.quantity(trade.quantity)} @{' '}
         {formatPrice(trade.entryPrice)}
       </p>
       {saveError && (
@@ -141,23 +158,42 @@ function QuickCloseForm({
         (finnhubApiKey || priceRelayUrl) &&
         status.refreshing && <p className="-mt-1 text-sm text-muted">Getting the current price…</p>
       )}
-      <Field
-        id="close-fees"
-        label="Fees"
-        hint="Round trip total, including the exit"
-        error={submitted ? errors.fees : undefined}
-      >
-        <input
-          {...fieldA11y('close-fees', submitted ? errors.fees : undefined)}
-          className={inputClass}
-          value={fees}
-          onChange={(e) => setFees(e.target.value)}
-          inputMode="decimal"
-          autoComplete="off"
-          placeholder="0.00"
-        />
-      </Field>
-      {result.ok && <PnlPreview trade={result.value} currency={currency} />}
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          id="close-quantity"
+          label="Shares to close"
+          hint={partial ? `${amounts.quantity(left)} stay open` : 'Lower it to close part'}
+          error={quantityError}
+        >
+          <input
+            {...fieldA11y('close-quantity', quantityError)}
+            className={`${inputClass} ${blurWhenHidden(amounts.hidden)}`}
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            onFocus={(e) => e.target.select()}
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="0"
+          />
+        </Field>
+        <Field
+          id="close-fees"
+          label="Fees"
+          hint={partial ? 'For these shares, with the exit' : 'Round trip, with the exit'}
+          error={submitted ? errors.fees : undefined}
+        >
+          <input
+            {...fieldA11y('close-fees', submitted ? errors.fees : undefined)}
+            className={`${inputClass} ${blurWhenHidden(amounts.hidden)}`}
+            value={fees}
+            onChange={(e) => setTypedFees(e.target.value)}
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="0.00"
+          />
+        </Field>
+      </div>
+      {result.ok && !quantityError && <PnlPreview trade={result.value} currency={currency} />}
       <div className="grid grid-cols-2 gap-3 pt-1">
         <button
           type="button"
@@ -171,7 +207,7 @@ function QuickCloseForm({
           disabled={saving}
           className="rounded-xl bg-accent py-3 font-semibold text-bg disabled:opacity-50"
         >
-          Close trade
+          {partial ? 'Close part' : 'Close trade'}
         </button>
       </div>
     </form>

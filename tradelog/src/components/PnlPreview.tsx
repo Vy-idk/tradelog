@@ -1,4 +1,5 @@
-import { formatSignedMoney, formatSignedPercent } from '../lib/format.ts'
+import { useAmounts } from '../lib/amounts.ts'
+import { formatSignedPercent } from '../lib/format.ts'
 import { returnPct, tradePnl } from '../lib/pnl.ts'
 import type { TradeInput } from '../db/schema.ts'
 import { pnlColor } from './styles.ts'
@@ -10,6 +11,7 @@ type Props = {
 
 /** "P&L +$120.00 (+4.00%)" for a closed trade; renders nothing while open. */
 function PnlPreview({ trade, currency }: Props) {
+  const amounts = useAmounts()
   const pnl = tradePnl(trade)
   const pct = returnPct(trade)
   if (pnl === null) return null
@@ -20,7 +22,7 @@ function PnlPreview({ trade, currency }: Props) {
     >
       <span className="text-sm text-muted">P&amp;L after fees</span>
       <span className={`font-semibold tabular-nums ${pnlColor(pnl)}`}>
-        {formatSignedMoney(pnl, currency)}
+        {amounts.signedMoney(pnl, currency)}
         {pct !== null && <span className="ml-1.5 text-sm">({formatSignedPercent(pct)})</span>}
       </span>
     </p>

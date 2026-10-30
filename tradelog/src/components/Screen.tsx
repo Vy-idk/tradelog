@@ -1,4 +1,7 @@
 import type { ReactNode } from 'react'
+import { updateSettings } from '../db/settings.ts'
+import { useAmounts } from '../lib/amounts.ts'
+import { EyeOffIcon, WatchlistIcon } from './icons.tsx'
 
 type Props = {
   title: string
@@ -7,12 +10,30 @@ type Props = {
   children?: ReactNode
 }
 
+function HideAmountsButton() {
+  const { hidden } = useAmounts()
+  return (
+    <button
+      type="button"
+      aria-label="Hide amounts"
+      aria-pressed={hidden}
+      onClick={() => updateSettings({ hideAmounts: !hidden })}
+      className="grid size-11 place-items-center rounded-full text-muted aria-pressed:text-accent"
+    >
+      {hidden ? <EyeOffIcon size={20} /> : <WatchlistIcon size={20} />}
+    </button>
+  )
+}
+
 function Screen({ title, action, children }: Props) {
   return (
     <section className="px-safe pb-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="py-4 text-2xl font-semibold">{title}</h1>
-        {action}
+        <div className="-mr-2 flex shrink-0 items-center">
+          {action}
+          <HideAmountsButton />
+        </div>
       </div>
       {children}
     </section>

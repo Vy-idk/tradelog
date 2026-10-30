@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import type { Trade } from '../db/schema.ts'
 import {
+  closedSince,
   dailyEquity,
   equityCurve,
+  equitySince,
+  holdingDays,
+  maxDrawdown,
   openPositions,
   pnlByMonth,
+  pnlBySide,
   pnlByStrategy,
+  pnlBySymbol,
+  pnlByTag,
+  pnlByWeekday,
+  rangeStart,
   returnPct,
+  streaks,
   tradePnl,
   tradeStats,
   unrealizedPnl,
@@ -216,10 +226,221 @@ describe('pnlByStrategy', () => {
       trade(50, { strategy: 'Breakout', exitPrice: null, exitDate: null }),
     ])
     expect(rows).toEqual([
-      { strategy: '', pnl: 8, count: 1, wins: 1 },
-      { strategy: 'Breakout', pnl: 5, count: 2, wins: 1 },
-      { strategy: 'Earnings', pnl: -30, count: 1, wins: 0 },
+      { key: '', pnl: 8, count: 1, wins: 1 },
+      { key: 'Breakout', pnl: 5, count: 2, wins: 1 },
+      { key: 'Earnings', pnl: -30, count: 1, wins: 0 },
     ])
+  })
+})
+
+describe('pnlBySymbol', () => {
+  it('puts the biggest gain or loss first, either way', () => {
+    const rows = pnlBySymbol([
+      trade(10, { symbol: 'AAPL' }),
+      trade(-40, { symbol: 'TSLA' }),
+      trade(25, { symbol: 'NVDA' }),
+    ])
+    expect(rows.map((r) => r.key)).toEqual(['TSLA', 'NVDA', 'AAPL'])
+  })
+})
+
+describe('pnlByTag', () => {
+  it('counts a trade under each of its tags, and groups the untagged', () => {
+    const rows = pnlByTag([
+      trade(10, { tags: ['gap', 'fomo'] }),
+      trade(-4, { tags: ['fomo'] }),
+      trade(1),
+    ])
+    expect(rows).toEqual([
+      { key: 'gap', pnl: 10, count: 1, wins: 1 },
+      { key: 'fomo', pnl: 6, count: 2, wins: 1 },
+      { key: '', pnl: 1, count: 1, wins: 1 },
+    ])
+  })
+})
+
+describe('pnlBySide', () => {
+  it('separates longs from shorts', () => {
+    const short = trade(null, { side: 'short', exitPrice: 90, exitDate: '2026-10-02' })
+    expect(pnlBySide([trade(5), short])).toEqual([
+      { key: 'short', pnl: 10, count: 1, wins: 1 },
+      { key: 'long', pnl: 5, count: 1, wins: 1 },
+    ])
+  })
+})
+
+describe('pnlByWeekday', () => {
+  it('uses the exit day, Monday first and Sunday last', () => {
+    const rows = pnlByWeekday([
+      trade(1, { exitDate: '2026-10-25' }), // Sunday
+      trade(2, { exitDate: '2026-10-30' }), // Friday
+      trade(3, { exitDate: '2026-10-26' }), // Monday
+    ])
+    expect(rows.map((r) => r.key)).toEqual(['1', '5', '0'])
+  })
+})
+
+describe('rangeStart', () => {
+  const today = '2026-10-30'
+
+  it('counts today as the last day of a rolling range', () => {
+    expect(rangeStart('30d', today)).toBe('2026-10-01')
+    expect(rangeStart('90d', today)).toBe('2026-08-02')
+    expect(rangeStart('1y', today)).toBe('2025-10-31')
+  })
+
+  it('starts the year to date on January 1, and all time nowhere', () => {
+    expect(rangeStart('ytd', today)).toBe('2026-01-01')
+    expect(rangeStart('all', today)).toBeNull()
+  })
+})
+
+describe('closedSince', () => {
+  it('drops trades closed earlier and keeps every open trade', () => {
+    const before = trade(1, { id: 'before', exitDate: '2026-09-30' })
+    const on = trade(1, { id: 'on', exitDate: '2026-10-01' })
+    const open = trade(null, { id: 'open', entryDate: '2020-01-01' })
+    const ids = closedSince([before, on, open], '2026-10-01').map((t) => t.id)
+    expect(ids).toEqual(['on', 'open'])
+  })
+
+  it('keeps everything for all time', () => {
+    const trades = [trade(1)]
+    expect(closedSince(trades, null)).toBe(trades)
+  })
+})
+
+describe('equitySince', () => {
+  const curve = equityCurve(
+    [
+      trade(10, { exitDate: '2026-08-10' }),
+      trade(-5, { exitDate: '2026-09-10' }),
+      trade(20, { exitDate: '2026-10-10' }),
+    ],
+    100,
+  )
+
+  it('starts from what earlier trades built up to', () => {
+    const { points, start } = equitySince(curve, 100, '2026-09-01')
+    expect(start).toBe(110)
+    expect(points.map((p) => p.equity)).toEqual([105, 125])
+  })
+
+  it('keeps the starting balance when nothing came before', () => {
+    expect(equitySince(curve, 100, '2026-01-01').start).toBe(100)
+  })
+
+  it('is empty after the last close, starting at the final equity', () => {
+    expect(equitySince(curve, 100, '2026-10-11')).toEqual({ points: [], start: 125 })
+  })
+
+  it('returns the whole curve for all time', () => {
+    expect(equitySince(curve, 100, null)).toEqual({ points: curve, start: 100 })
+  })
+})
+
+describe('maxDrawdown', () => {
+  it('measures the largest fall from a peak, as an amount and a percentage', () => {
+    const curve = equityCurve(
+      [
+        trade(100, { exitDate: '2026-10-01' }), // 1100, the peak
+        trade(-200, { exitDate: '2026-10-02' }), // 900
+        trade(-120, { exitDate: '2026-10-03' }), // 780, the trough
+        trade(500, { exitDate: '2026-10-04' }), // 1280, a new peak
+        trade(-100, { exitDate: '2026-10-05' }), // A smaller fall
+      ],
+      1000,
+    )
+    const drawdown = maxDrawdown(curve, 1000)
+    expect(drawdown.amount).toBe(-320)
+    expect(drawdown.pct).toBeCloseTo((-320 / 1100) * 100)
+    expect(drawdown.peakDate).toBe('2026-10-01')
+    expect(drawdown.troughDate).toBe('2026-10-03')
+  })
+
+  it('counts a fall from the starting balance, with no peak date', () => {
+    const curve = equityCurve([trade(-50, { exitDate: '2026-10-01' })], 1000)
+    expect(maxDrawdown(curve, 1000)).toEqual({
+      amount: -50,
+      pct: -5,
+      peakDate: null,
+      troughDate: '2026-10-01',
+    })
+  })
+
+  it('looks at end-of-day equity, not the order of trades within a day', () => {
+    const curve = equityCurve(
+      [
+        trade(-30, { exitDate: '2026-10-01', createdAt: 1 }),
+        trade(30, { exitDate: '2026-10-01', createdAt: 2 }),
+      ],
+      100,
+    )
+    expect(maxDrawdown(curve, 100).amount).toBe(0)
+  })
+
+  it('has no percentage without a balance above zero', () => {
+    const curve = equityCurve([trade(-50, { exitDate: '2026-10-01' })], 0)
+    expect(maxDrawdown(curve, 0)).toMatchObject({ amount: -50, pct: null })
+  })
+
+  it('is zero when equity only rises, or with no trades', () => {
+    const curve = equityCurve([trade(5), trade(5)], 100)
+    expect(maxDrawdown(curve, 100).amount).toBe(0)
+    expect(maxDrawdown([], 100).troughDate).toBeNull()
+  })
+})
+
+describe('streaks', () => {
+  const exits = (...pnls: number[]) =>
+    pnls.map((pnl, i) =>
+      trade(pnl, { exitDate: `2026-10-${String(i + 1).padStart(2, '0')}`, entryDate: '2026-09-01' }),
+    )
+
+  it('finds the longest runs and the current one', () => {
+    expect(streaks(exits(1, 1, 1, -1, -1, 1))).toEqual({
+      longestWin: 3,
+      longestLoss: 2,
+      current: 1,
+    })
+  })
+
+  it('reports a current losing run as negative', () => {
+    expect(streaks(exits(1, -1, -1)).current).toBe(-2)
+  })
+
+  it('lets break-even trades pass without ending a run', () => {
+    expect(streaks(exits(1, 0, 1, 0, 1))).toEqual({ longestWin: 3, longestLoss: 0, current: 3 })
+  })
+
+  it('follows exit order and ignores open trades', () => {
+    const later = trade(-1, { exitDate: '2026-10-20' })
+    const earlier = trade(1, { exitDate: '2026-10-10' })
+    expect(streaks([later, trade(null), earlier]).current).toBe(-1)
+  })
+
+  it('is empty with no closed trades', () => {
+    expect(streaks([])).toEqual({ longestWin: 0, longestLoss: 0, current: 0 })
+  })
+})
+
+describe('holdingDays', () => {
+  it('averages calendar days, overall and for winners and losers', () => {
+    const held = holdingDays([
+      trade(5, { entryDate: '2026-10-01', exitDate: '2026-10-03' }),
+      trade(5, { entryDate: '2026-10-01', exitDate: '2026-10-05' }),
+      trade(-5, { entryDate: '2026-10-01', exitDate: '2026-10-10' }),
+      trade(0, { entryDate: '2026-10-01', exitDate: '2026-10-01' }),
+      trade(null),
+    ])
+    expect(held.all).toBe(15 / 4)
+    expect(held.wins).toBe(3)
+    expect(held.losses).toBe(9)
+  })
+
+  it('is null with nothing to average', () => {
+    expect(holdingDays([trade(5)]).losses).toBeNull()
+    expect(holdingDays([]).all).toBeNull()
   })
 })
 

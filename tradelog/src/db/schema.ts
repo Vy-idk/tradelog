@@ -22,6 +22,8 @@ export type Trade = {
   strategy: string
   tags: string[]
   notes: string
+  /** On the closed part of a partial close: the open trade it was split from */
+  partOf?: string
   createdAt: number
   updatedAt: number
 }
@@ -98,6 +100,21 @@ export type FxRatesRow = {
   fetchedAt: number
 }
 
+/** The next earnings report for a symbol. A cache, never backed up. */
+export type EarningsRow = {
+  symbol: string
+  /** YYYY-MM-DD of the next report; null when none is scheduled, e.g. for an ETF */
+  date: string | null
+  /** Before the open, after the close, during market hours, or not known */
+  hour: 'bmo' | 'amc' | 'dmh' | ''
+  /** True when Finnhub says the API key's plan doesn't include earnings dates */
+  noAccess?: boolean
+  fetchedAt: number
+}
+
+/** The period Stats cover, counted by exit date. */
+export type StatsRange = '30d' | '90d' | 'ytd' | '1y' | 'all'
+
 export type Settings = {
   id: 'app'
   finnhubApiKey: string
@@ -113,6 +130,9 @@ export type Settings = {
   cashBalances: CashBalance[]
   /** The currency picked on the Stats screen; blank means the main currency */
   statsCurrency: string
+  statsRange: StatsRange
+  /** Masks money and share counts on screen, for using the app around other people */
+  hideAmounts: boolean
   lastBackupAt: number | null
   /** The backup reminder stays hidden until this time after tapping "Later" */
   backupReminderSnoozedUntil: number | null
@@ -129,6 +149,7 @@ export class TradeLogDB extends Dexie {
   /** Caches too */
   symbols!: Table<SymbolInfo, string>
   fxRates!: Table<FxRatesRow, string>
+  earnings!: Table<EarningsRow, string>
 
   constructor() {
     super('tradelog')
@@ -161,6 +182,9 @@ export class TradeLogDB extends Dexie {
             s.startingBalanceCurrency ??= s.currency ?? 'USD'
           }),
       )
+    this.version(5).stores({
+      earnings: 'symbol',
+    })
   }
 }
 

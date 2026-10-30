@@ -107,7 +107,7 @@ function Journal() {
   )
   const prices = useLivePrices(openSymbols, now)?.prices
   const online = useOnline()
-  // Prices only refresh on the watchlist, so an old one is labelled with its time
+  // Prices only refresh on Watchlist and Stats, so an old one is labelled with its time
   const stale = (live: LivePrice | undefined) =>
     live !== undefined && isStale(live, online ? undefined : 'offline', now)
 

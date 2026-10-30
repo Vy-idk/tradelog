@@ -11,6 +11,8 @@ export const DEFAULT_SETTINGS: Settings = {
   startingBalanceCurrency: 'USD',
   cashBalances: [],
   statsCurrency: '',
+  statsRange: 'all',
+  hideAmounts: false,
   lastBackupAt: null,
   backupReminderSnoozedUntil: null,
 }

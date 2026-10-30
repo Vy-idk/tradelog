@@ -39,14 +39,26 @@ body,
   height: 100%;
 }
 
+/*
+ * The page itself never moves: the app scrolls inside its own panels. Without
+ * this, iOS drags the whole page, tab bar included, past the end of a list.
+ * The viewport only takes overscroll-behavior from <html>, not from <body>.
+ */
+html,
 body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
   margin: 0;
   background: var(--color-bg);
   color: #e6edf3;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: none;
 }
 
 ::selection {

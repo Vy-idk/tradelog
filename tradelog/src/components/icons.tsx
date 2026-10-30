@@ -48,6 +48,23 @@ export function WatchlistIcon(props: Props) {
   )
 }
 
+export function EyeOffIcon(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-3 4M6.4 6.4A17 17 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 5.6-1.6" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18" />
+    </Icon>
+  )
+}
+
+export function ChevronIcon(props: Props) {
+  return (
+    <Icon {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </Icon>
+  )
+}
+
 export function SettingsIcon(props: Props) {
   return (
     <Icon {...props}>

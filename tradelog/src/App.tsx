@@ -3,6 +3,8 @@ import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import Screen from './components/Screen.tsx'
 import TabBar from './components/TabBar.tsx'
 import UpdateWhenIdle from './components/UpdateWhenIdle.tsx'
+import { useLoadedSettings } from './db/settings.ts'
+import { AmountsHidden } from './lib/amounts.ts'
 import Journal from './screens/Journal.tsx'
 import Settings from './screens/Settings.tsx'
 import TradeForm from './screens/TradeForm.tsx'
@@ -25,7 +27,12 @@ function TabLayout() {
     // The notch padding sits outside the scroll area, so scrolled content
     // never slides under the clock in the transparent status bar
     <div className="flex h-full flex-col pt-[env(safe-area-inset-top)]">
-      <main ref={main} className="flex-1 overflow-y-auto">
+      {/* relative: screen-reader labels are absolute, and would otherwise escape
+          this panel and make the whole page scrollable */}
+      <main
+        ref={main}
+        className="relative flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+      >
         <Outlet />
       </main>
       <TabBar />
@@ -34,8 +41,10 @@ function TabLayout() {
 }
 
 function App() {
+  const settings = useLoadedSettings()
   return (
-    <>
+    // Masked until the setting loads, so hidden amounts never flash on opening
+    <AmountsHidden value={settings?.hideAmounts ?? true}>
       <UpdateWhenIdle />
       <Routes>
         <Route element={<TabLayout />}>
@@ -56,7 +65,7 @@ function App() {
         <Route path="/trade/:id" element={<TradeForm />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </>
+    </AmountsHidden>
   )
 }
 

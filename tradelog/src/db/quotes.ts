@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useMemo, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import {
   createExtendedClient,
   livePrice,
@@ -8,7 +8,7 @@ import {
   type LivePrice,
 } from '../lib/extended.ts'
 import { sessionAt } from '../lib/market.ts'
-import { createPriceClient, type QuoteError, type QuoteResult } from '../lib/prices.ts'
+import { QUOTE_TTL, createPriceClient, type QuoteError, type QuoteResult } from '../lib/prices.ts'
 import { db, type ExtendedQuote, type Quote } from './schema.ts'
 
 /** One client per source for the whole app, so caches and rate limits are shared. */
@@ -237,6 +237,53 @@ export async function refreshQuotes(
     ])
     return results
   })
+}
+
+/** Just past the cache period, so every quote is due when the timer fires */
+const AUTO_REFRESH_MS = QUOTE_TTL + 1000
+
+/**
+ * Keeps prices fresh while a screen that shows them is open: once on arrival,
+ * then every minute while the app is in the foreground and online, and as
+ * soon as a rate-limit back-off ends. Returns a manual refresh for
+ * pull-to-refresh and the refresh button.
+ */
+export function usePriceRefresh(
+  symbols: string[],
+  { apiKey, relayUrl }: PriceSources,
+  online: boolean,
+  retryAt: number | null,
+) {
+  const key = symbols.join(',')
+  const enabled = Boolean(key && (apiKey || relayUrl) && online)
+  const refresh = useCallback(
+    (maxAge?: number) => refreshQuotes(key ? key.split(',') : [], { apiKey, relayUrl }, { maxAge }),
+    [key, apiKey, relayUrl],
+  )
+
+  useEffect(() => {
+    if (!enabled) return
+    void refresh()
+    const tick = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const timer = setInterval(tick, AUTO_REFRESH_MS)
+    // Coming back to the app refreshes right away instead of on the next tick
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [refresh, enabled])
+
+  useEffect(() => {
+    if (!retryAt || !enabled) return
+    // A moment past the end, so the client is no longer backing off
+    const timer = setTimeout(() => void refresh(), Math.max(0, retryAt - Date.now()) + 250)
+    return () => clearTimeout(timer)
+  }, [retryAt, refresh, enabled])
+
+  return refresh
 }
 
 /** A well-known symbol to check a key or the relay with. */
