@@ -137,6 +137,18 @@ export function openCost(trades: Trade[]): number {
   return total
 }
 
+/**
+ * Fees already taken from cash for trades still open. Older trades pay theirs
+ * when they close, so only trades with a cash record count.
+ */
+export function paidOpenFees(trades: Trade[]): number {
+  let total = 0
+  for (const t of trades) {
+    if (!isClosed(t) && t.cashMoved !== undefined) total += t.fees
+  }
+  return total
+}
+
 /** Realized P&L of every closed trade, in dollars. */
 export function realizedPnl(trades: Trade[]): number {
   return trades.reduce((sum, t) => sum + (tradePnl(t) ?? 0), 0)
@@ -181,7 +193,7 @@ export function startingEquity(
   }
   const cash = sumBalances(settings.cashBalances, currency, rates)!
   const fromTrades = convert(
-    openCost(trades) - realizedPnl(trades),
+    openCost(trades) + paidOpenFees(trades) - realizedPnl(trades),
     TRADE_CURRENCY,
     currency,
     rates,

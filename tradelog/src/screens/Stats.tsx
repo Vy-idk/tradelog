@@ -235,15 +235,6 @@ function AccountCard({
             : `${unpriced} open trades don't have a price yet, so they count at cost.`}
         </p>
       )}
-      {cash !== null && (
-        <p className="mt-2 text-xs text-muted">
-          Cash doesn&apos;t change by itself, so{' '}
-          <Link to="/settings" className="text-accent underline underline-offset-2">
-            update it
-          </Link>{' '}
-          when you open or close a trade.
-        </p>
-      )}
     </section>
   )
 }

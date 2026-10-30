@@ -1,16 +1,20 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useFxRates, useFxRefresh } from '../db/fx.ts'
 import { priceFailure, refreshQuotes, useLivePrices, usePriceStatus } from '../db/quotes.ts'
 import type { Trade } from '../db/schema.ts'
 import { useSettings } from '../db/settings.ts'
 import { closeTrade } from '../db/trades.ts'
 import { useAmounts } from '../lib/amounts.ts'
+import { planClose, tracksCash } from '../lib/cash.ts'
 import { today } from '../lib/dates.ts'
 import { formatAge, formatPrice } from '../lib/format.ts'
+import { accountCurrencies } from '../lib/fx.ts'
 import { isStale } from '../lib/prices.ts'
 import { feeShare, sharesLeft } from '../lib/positions.ts'
 import { draftFromTrade, parseNumber, validateDraft } from '../lib/tradeDraft.ts'
 import { useNow } from '../lib/useNow.ts'
 import { useOnline } from '../lib/useOnline.ts'
+import CashPreview from './CashPreview.tsx'
 import Field from './Field.tsx'
 import Modal from './Modal.tsx'
 import PnlPreview from './PnlPreview.tsx'
@@ -51,7 +55,11 @@ function QuickCloseForm({
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const { finnhubApiKey, priceRelayUrl } = useSettings()
+  const settings = useSettings()
+  const { finnhubApiKey, priceRelayUrl } = settings
+  const rates = useFxRates()
+  const tracking = tracksCash(settings)
+  useFxRefresh(tracking && accountCurrencies(settings).length > 1)
   const status = usePriceStatus()
   const online = useOnline()
   const now = useNow(30_000)
@@ -84,15 +92,23 @@ function QuickCloseForm({
   const quantityError =
     errors.quantity ??
     (closing > trade.quantity ? `This trade holds ${amounts.quantity(trade.quantity)}` : undefined)
+  const close =
+    result.ok && !quantityError && result.value.exitPrice !== null
+      ? {
+          quantity: result.value.quantity,
+          exitPrice: result.value.exitPrice,
+          exitDate: result.value.exitDate!,
+          fees: result.value.fees,
+        }
+      : null
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setSubmitted(true)
-    if (!result.ok || quantityError || saving) return
+    if (!close || saving) return
     setSaving(true)
     try {
-      const { quantity, exitPrice, exitDate, fees } = result.value
-      await closeTrade(trade.id, { quantity, exitPrice: exitPrice!, exitDate: exitDate!, fees })
+      await closeTrade(trade.id, close)
       onDone()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -194,6 +210,13 @@ function QuickCloseForm({
         </Field>
       </div>
       {result.ok && !quantityError && <PnlPreview trade={result.value} currency={currency} />}
+      {close && (
+        <CashPreview
+          delta={planClose(trade, close, tracking, '', 0).delta}
+          settings={settings}
+          rates={rates}
+        />
+      )}
       <div className="grid grid-cols-2 gap-3 pt-1">
         <button
           type="button"

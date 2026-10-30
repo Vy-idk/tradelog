@@ -1,4 +1,5 @@
 import type { CashBalance, Settings, Trade, WatchItem } from '../db/schema.ts'
+import { withCashMoved } from './cash.ts'
 import { isIsoDate, today } from './dates.ts'
 import { returnPct, tradePnl } from './pnl.ts'
 
@@ -98,6 +99,10 @@ function readTrade(raw: unknown, now: number): Trade {
   if (partOf !== undefined && partOf !== null && typeof partOf !== 'string')
     throw new FieldError("partOf isn't text")
 
+  const { cashMoved } = raw
+  if (cashMoved !== undefined && cashMoved !== null && !isNumber(cashMoved))
+    throw new FieldError("cashMoved isn't a number")
+
   const createdAt = isNumber(raw.createdAt) ? raw.createdAt : now
   return {
     id,
@@ -113,6 +118,7 @@ function readTrade(raw: unknown, now: number): Trade {
     tags: [...new Set(tags.map((t) => t.trim()).filter(Boolean))],
     notes: optionalString(raw, 'notes'),
     ...(partOf ? { partOf } : {}),
+    ...(isNumber(cashMoved) ? { cashMoved } : {}),
     createdAt,
     updatedAt: isNumber(raw.updatedAt) ? raw.updatedAt : createdAt,
   }
@@ -306,6 +312,12 @@ export type ImportPlan = {
  * part of a partial close is left out when this device changed the open trade
  * since: those shares may be back in it, and adding them would count them
  * twice. Replace makes the journal and watchlist exactly match the backup.
+ *
+ * Merge never moves cash: it keeps this device's balances, and they already
+ * are what the user holds. So cashMoved stays as this device recorded it, and
+ * a new trade arrives without one, or deleting it would take back cash that
+ * was only ever moved on the device it came from. Replace restores the backup's
+ * cash along with its trades, so their records still match.
  */
 export function planImport(
   existing: Pick<BackupSource, 'trades' | 'watchlist'>,
@@ -348,7 +360,7 @@ export function planImport(
       added++
     } else if (t.updatedAt > mine.updatedAt) updated++
     else continue
-    trades.push(t)
+    trades.push(withCashMoved(t, mine?.cashMoved))
   }
   const watchlist = backup.watchlist.filter((w) => !watched.has(w.symbol))
   return {

@@ -99,6 +99,9 @@ function Section({ id, title, children }: { id?: string; title: string; children
 
 const balanceText = (value: number) => (value ? String(value) : '')
 
+/** Balances can hold fractions of a cent after a conversion, so they show to the cent. */
+const cashText = (value: number) => balanceText(Number(value.toFixed(2)))
+
 /** Reads a typed balance: a number, or an error message. Blank is zero. */
 function readAmount(text: string, label: string): number | string {
   const value = parseNumber(text) ?? 0
@@ -240,9 +243,11 @@ function CashBalances({ settings, rates }: { settings: AppSettings; rates: FxRat
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">
-        The cash in your account today, in any currency. TradeLog adds your open trades at current
-        prices for your account value, and works back through your closed trades to where you
-        started.
+        The cash in your account today, in any currency. It updates as you log, close, edit or
+        delete trades: dollars are used first, then other balances are converted at the saved rates.
+        Money back always lands in dollars. Trades already in your journal aren&apos;t counted again,
+        and you can correct these amounts at any time. Changes made while you use a starting
+        balance don&apos;t move this cash, so check it if you switch back.
       </p>
       {cashBalances.length > 0 && (
         <ul className="space-y-3">
@@ -305,7 +310,7 @@ function CashBalanceRow({
   const id = `settings-cash-${index}`
   const { hidden } = useAmounts()
   const [label, setLabel] = useState(balance.label)
-  const [amount, setAmount] = useState(balanceText(balance.amount))
+  const [amount, setAmount] = useState(cashText(balance.amount))
   const [error, setError] = useState('')
 
   // Show stored values after saving, or when a restore changes them. Compared
@@ -316,12 +321,19 @@ ${balance.amount}`
   if (shown !== stored) {
     setShown(stored)
     setLabel(balance.label)
-    setAmount(balanceText(balance.amount))
+    setAmount(cashText(balance.amount))
   }
 
   function saveText() {
-    const value = readAmount(amount, 'Cash')
-    if (typeof value === 'string') return setError(value)
+    // Left as shown, the stored amount keeps its full precision
+    let value = balance.amount
+    if (amount !== cashText(balance.amount)) {
+      // A shortfall from a trade shows as a negative, which must survive a save
+      const text = amount.trim()
+      const unsigned = readAmount(text.replace(/^[-−]/, ''), 'Cash')
+      if (typeof unsigned === 'string') return setError(unsigned)
+      value = /^[-−]/.test(text) ? -unsigned : unsigned
+    }
     setError('')
     const trimmed = label.trim()
     if (value !== balance.amount || trimmed !== balance.label) {

@@ -34,6 +34,17 @@ TradeLog never places trades and gives no investment advice.
    always in US dollars; Stats can switch between dollars and your currency at
    today's exchange rate.
 
+With cash balances, the journal keeps them up to date. Logging a trade takes
+its cost from your dollars, then converts other balances at the saved exchange
+rates if dollars run out; closing it puts the proceeds back in dollars, and
+editing or deleting it adjusts cash by the difference. If there isn't enough
+cash, or a rate is missing, the trade still saves and your dollar balance goes
+negative by what's short. Trades logged before you entered your cash don't move
+it, except that closing one adds what the sale brought in and reopening one
+takes that back out. Nothing moves cash while you use a starting balance, so
+check it if you switch back. Restoring a backup with **Merge** never changes
+cash.
+
 Your journal lives only on the phone. Deleting the home screen icon, or
 clearing Safari's website data, deletes it too, so export a backup to Files or
 iCloud Drive regularly. The app reminds you after 7 days.

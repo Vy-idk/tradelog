@@ -8,20 +8,23 @@ import {
   type ReactNode,
 } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
+import CashPreview from '../components/CashPreview.tsx'
 import ConfirmDialog from '../components/ConfirmDialog.tsx'
 import Field from '../components/Field.tsx'
 import PnlPreview from '../components/PnlPreview.tsx'
 import { EmptyState } from '../components/Screen.tsx'
 import { SearchIcon } from '../components/icons.tsx'
 import { blurWhenHidden, chipClass, fieldA11y, inputClass } from '../components/styles.ts'
+import { useFxRates, useFxRefresh } from '../db/fx.ts'
 import type { Side, Trade } from '../db/schema.ts'
 import { useLoadedSettings } from '../db/settings.ts'
 import { checkSymbol } from '../db/symbols.ts'
 import { addTrade, deleteTrade, updateTrade, useTrade, useTrades } from '../db/trades.ts'
 import { useAmounts } from '../lib/amounts.ts'
+import { planDelete, planSave, tracksCash } from '../lib/cash.ts'
 import { today } from '../lib/dates.ts'
 import { formatPrice } from '../lib/format.ts'
-import { TRADE_CURRENCY } from '../lib/fx.ts'
+import { accountCurrencies, TRADE_CURRENCY } from '../lib/fx.ts'
 import { journalScroll, strategySuggestions, tagSuggestions } from '../lib/journal.ts'
 import { uncheckedText, type SymbolCheck } from '../lib/symbols.ts'
 import {
@@ -124,7 +127,11 @@ function TradeForm() {
 function TradeFormBody({ trade }: { trade: Trade | null }) {
   const goBack = useGoBack()
   const amounts = useAmounts()
-  const apiKey = useLoadedSettings()?.finnhubApiKey
+  const settings = useLoadedSettings()
+  const apiKey = settings?.finnhubApiKey
+  const rates = useFxRates()
+  const tracking = settings !== undefined && tracksCash(settings)
+  useFxRefresh(tracking && accountCurrencies(settings).length > 1)
   const trades = useTrades()
   const isNew = trade === null
   // "Log a trade" on the watchlist opens the form with the symbol filled in
@@ -562,6 +569,14 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
           />
         </Field>
 
+        {settings && result.ok && (
+          <CashPreview
+            delta={planSave(trade, result.value, tracking).delta}
+            settings={settings}
+            rates={rates}
+          />
+        )}
+
         <button
           type="submit"
           disabled={saving}
@@ -594,6 +609,15 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
             {trade.symbol} {trade.side} · {amounts.quantity(trade.quantity)} @{' '}
             {formatPrice(trade.entryPrice)}. This can't be undone.
           </p>
+        )}
+        {trade && settings && (
+          <div className="mt-3">
+            <CashPreview
+              delta={planDelete(trade, tracking)}
+              settings={settings}
+              rates={rates}
+            />
+          </div>
         )}
       </ConfirmDialog>
 

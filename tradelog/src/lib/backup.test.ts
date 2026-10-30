@@ -205,6 +205,35 @@ describe('parseBackup tidies valid files', () => {
   })
 })
 
+describe('cash records in backups', () => {
+  it('survive a round trip, and a bad one rejects the file', () => {
+    const raw = validRaw()
+    raw.trades[0].cashMoved = -1005
+    const parsed = parseBackup(JSON.stringify(raw))
+    expect(parsed.ok && parsed.backup.trades[0].cashMoved).toBe(-1005)
+    raw.trades[0].cashMoved = 'lots'
+    expect(parseBackup(JSON.stringify(raw)).ok).toBe(false)
+  })
+
+  it("merge keeps this device's record, so deleting can't undo another device's cash", () => {
+    const empty = { trades: [], watchlist: [] }
+    const incoming = trade({ cashMoved: -500, updatedAt: 9 })
+    expect(planImport(empty, backupWith([incoming]), 'merge').trades[0].cashMoved).toBeUndefined()
+
+    const mine = trade({ cashMoved: -300, updatedAt: 1 })
+    const existing = { trades: [mine], watchlist: [] }
+    expect(planImport(existing, backupWith([incoming]), 'merge').trades[0].cashMoved).toBe(-300)
+    const older = { trades: [trade({ updatedAt: 1 })], watchlist: [] }
+    expect(planImport(older, backupWith([incoming]), 'merge').trades[0].cashMoved).toBeUndefined()
+  })
+
+  it('replace keeps the record, since it restores the cash too', () => {
+    const empty = { trades: [], watchlist: [] }
+    const incoming = trade({ cashMoved: -500 })
+    expect(planImport(empty, backupWith([incoming]), 'replace').trades[0].cashMoved).toBe(-500)
+  })
+})
+
 describe('planImport', () => {
   const mine = [
     trade({ id: 'same', updatedAt: 5 }),

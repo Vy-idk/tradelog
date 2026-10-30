@@ -24,6 +24,12 @@ export type Trade = {
   notes: string
   /** On the closed part of a partial close: the open trade it was split from */
   partOf?: string
+  /**
+   * Dollars the app has added to cash for this trade so far (negative: taken
+   * out). Missing on trades it never touched cash for, such as ones logged
+   * before cash tracking: their effect is already in the cash the user typed.
+   */
+  cashMoved?: number
   createdAt: number
   updatedAt: number
 }

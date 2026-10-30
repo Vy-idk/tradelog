@@ -1,5 +1,6 @@
 import { lazy, Suspense, useLayoutEffect, useRef } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import CashNotice from './components/CashNotice.tsx'
 import Screen from './components/Screen.tsx'
 import TabBar from './components/TabBar.tsx'
 import UpdateWhenIdle from './components/UpdateWhenIdle.tsx'
@@ -46,6 +47,7 @@ function App() {
     // Masked until the setting loads, so hidden amounts never flash on opening
     <AmountsHidden value={settings?.hideAmounts ?? true}>
       <UpdateWhenIdle />
+      <CashNotice />
       <Routes>
         <Route element={<TabLayout />}>
           <Route path="/" element={<Journal />} />
