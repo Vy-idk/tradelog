@@ -7,7 +7,14 @@ import { PriceCell, PriceLabel, StaleLabel } from '../components/Price.tsx'
 import PullToRefresh from '../components/PullToRefresh.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
 import { chipClass, fieldA11y, inputClass, pnlColor } from '../components/styles.ts'
-import { refreshQuotes, usePriceStatus, useQuotes, type PriceStatus } from '../db/quotes.ts'
+import {
+  priceFailure,
+  refreshQuotes,
+  useLivePrices,
+  usePriceStatus,
+  type PriceSources,
+  type PriceStatus,
+} from '../db/quotes.ts'
 import type { Quote, Trade, WatchItem } from '../db/schema.ts'
 import { useLoadedSettings } from '../db/settings.ts'
 import { useTrades } from '../db/trades.ts'
@@ -26,8 +33,9 @@ import {
   formatSignedPercent,
   formatSignedPrice,
 } from '../lib/format.ts'
+import type { ExtendedError, LivePrice } from '../lib/extended.ts'
 import { distinctSorted } from '../lib/journal.ts'
-import { priceSession, priceSessionLong } from '../lib/market.ts'
+import { priceSessionLong, sessionAt, type PriceSession } from '../lib/market.ts'
 import { isClosed, openPositions, unrealizedPnl, unrealizedReturnPct } from '../lib/pnl.ts'
 import { MANUAL_REFRESH_AGE, QUOTE_TTL, quoteErrorLong, type QuoteError } from '../lib/prices.ts'
 import { parseNumber } from '../lib/tradeDraft.ts'
@@ -47,18 +55,19 @@ const sectionHeading = 'text-sm font-medium tracking-wide text-muted uppercase'
  */
 function usePriceRefresh(
   symbols: string[],
-  apiKey: string,
+  { apiKey, relayUrl }: PriceSources,
   online: boolean,
   retryAt: number | null,
 ) {
   const key = symbols.join(',')
+  const enabled = Boolean(key && (apiKey || relayUrl) && online)
   const refresh = useCallback(
-    (maxAge?: number) => refreshQuotes(key ? key.split(',') : [], apiKey, { maxAge }),
-    [key, apiKey],
+    (maxAge?: number) => refreshQuotes(key ? key.split(',') : [], { apiKey, relayUrl }, { maxAge }),
+    [key, apiKey, relayUrl],
   )
 
   useEffect(() => {
-    if (!key || !apiKey || !online) return
+    if (!enabled) return
     void refresh()
     const tick = () => {
       if (document.visibilityState === 'visible') void refresh()
@@ -70,14 +79,14 @@ function usePriceRefresh(
       clearInterval(timer)
       document.removeEventListener('visibilitychange', tick)
     }
-  }, [refresh, key, apiKey, online])
+  }, [refresh, enabled])
 
   useEffect(() => {
-    if (!retryAt || !key || !apiKey || !online) return
+    if (!retryAt || !enabled) return
     // A moment past the end, so the client is no longer backing off
     const timer = setTimeout(() => void refresh(), Math.max(0, retryAt - Date.now()) + 250)
     return () => clearTimeout(timer)
-  }, [retryAt, refresh, key, apiKey, online])
+  }, [retryAt, refresh, enabled])
 
   return refresh
 }
@@ -205,23 +214,64 @@ function PriceBanner({
   )
 }
 
+const extendedProblemText: Record<Exclude<ExtendedError, 'offline'>, string> = {
+  'rate-limited':
+    'Yahoo is rate limiting the price relay. Pre-market and after-hours prices will retry shortly.',
+  failed:
+    "Couldn't reach the price relay, so pre-market and after-hours prices may be missing or old.",
+  'bad-relay': "The relay URL in Settings doesn't answer like the TradeLog price relay.",
+}
+
+/**
+ * Outside regular hours, a note when pre-market and after-hours prices are
+ * missing: no relay set up yet, or the relay is having trouble.
+ */
+function ExtendedNote({
+  relayUrl,
+  problem,
+  now,
+}: {
+  relayUrl: string
+  problem: ExtendedError | null
+  now: number
+}) {
+  if (sessionAt(now) === 'regular') return null
+  if (!relayUrl) {
+    return (
+      <p className="-mt-2 mb-4 text-sm text-muted">
+        Showing closing prices.{' '}
+        <Link to="/settings?focus=relay" className="text-accent underline underline-offset-2">
+          Set up the price relay
+        </Link>{' '}
+        for pre-market and after-hours prices.
+      </p>
+    )
+  }
+  if (!problem || problem === 'offline') return null
+  return (
+    <p role="alert" className="-mt-2 mb-4 text-sm text-amber-200">
+      {extendedProblemText[problem]}
+    </p>
+  )
+}
+
 function OpenPositionRow({
   trade,
-  quote,
+  live,
   failure,
   loading,
   currency,
   now,
 }: {
   trade: Trade
-  quote: Quote | undefined
+  live: LivePrice | undefined
   failure: QuoteError | undefined
   loading: boolean
   currency: string
   now: number
 }) {
-  const pnl = quote ? unrealizedPnl(trade, quote.price) : null
-  const pct = quote ? unrealizedReturnPct(trade, quote.price) : null
+  const pnl = live ? unrealizedPnl(trade, live.price) : null
+  const pct = live ? unrealizedReturnPct(trade, live.price) : null
   return (
     <li>
       <Link
@@ -236,9 +286,9 @@ function OpenPositionRow({
           <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted tabular-nums">
             <span className="truncate">
               {formatQuantity(trade.quantity)} @ {formatPrice(trade.entryPrice)}
-              {quote && ` → ${formatPrice(quote.price)}`}
+              {live && ` → ${formatPrice(live.price)}`}
             </span>
-            {quote && <PriceLabel quote={quote} failure={failure} now={now} />}
+            {live && <PriceLabel live={live} failure={failure} now={now} />}
           </p>
         </div>
         {pnl !== null ? (
@@ -249,7 +299,7 @@ function OpenPositionRow({
             )}
           </div>
         ) : (
-          <PriceCell quote={undefined} failure={failure} loading={loading} now={now} />
+          <PriceCell live={undefined} failure={failure} loading={loading} now={now} />
         )}
       </Link>
     </li>
@@ -258,22 +308,22 @@ function OpenPositionRow({
 
 function OpenPositionsSection({
   trades,
-  quotes,
+  prices,
   failures,
   loading,
   currency,
   now,
 }: {
   trades: Trade[]
-  quotes: ReadonlyMap<string, Quote>
+  prices: ReadonlyMap<string, LivePrice>
   failures: Readonly<Record<string, QuoteError>>
   loading: boolean
   currency: string
   now: number
 }) {
   const summary = useMemo(
-    () => openPositions(trades, new Map([...quotes].map(([s, q]) => [s, q.price]))),
-    [trades, quotes],
+    () => openPositions(trades, new Map([...prices].map(([s, p]) => [s, p.price]))),
+    [trades, prices],
   )
   const totalPct = summary.costBasis ? (summary.unrealizedPnl / summary.costBasis) * 100 : null
 
@@ -298,7 +348,7 @@ function OpenPositionsSection({
           <OpenPositionRow
             key={t.id}
             trade={t}
-            quote={quotes.get(t.symbol)}
+            live={prices.get(t.symbol)}
             failure={failures[t.symbol]}
             loading={loading}
             currency={currency}
@@ -398,30 +448,30 @@ function AddSymbolForm({ suggestions }: { suggestions: string[] }) {
   )
 }
 
-function targetText(item: WatchItem, quote: Quote | undefined): string {
+function targetText(item: WatchItem, live: LivePrice | undefined): string {
   if (item.targetPrice === undefined) return ''
-  const away = quote
-    ? ` (${formatSignedPercent(((item.targetPrice - quote.price) / quote.price) * 100)})`
+  const away = live
+    ? ` (${formatSignedPercent(((item.targetPrice - live.price) / live.price) * 100)})`
     : ''
   return `Target ${formatPrice(item.targetPrice)}${away}`
 }
 
 function WatchRow({
   item,
-  quote,
+  live,
   failure,
   loading,
   now,
   onOpen,
 }: {
   item: WatchItem
-  quote: Quote | undefined
+  live: LivePrice | undefined
   failure: QuoteError | undefined
   loading: boolean
   now: number
   onOpen: (symbol: string) => void
 }) {
-  const detail = [targetText(item, quote), item.note].filter(Boolean).join(' · ')
+  const detail = [targetText(item, live), item.note].filter(Boolean).join(' · ')
   return (
     <li>
       <button
@@ -433,7 +483,7 @@ function WatchRow({
           <p className="truncate font-semibold">{item.symbol}</p>
           {detail && <p className="mt-0.5 truncate text-xs text-muted tabular-nums">{detail}</p>}
         </div>
-        <PriceCell quote={quote} failure={failure} loading={loading} now={now} />
+        <PriceCell live={live} failure={failure} loading={loading} now={now} />
       </button>
     </li>
   )
@@ -448,14 +498,25 @@ function Stat({ label, value }: { label: string; value: number }) {
   )
 }
 
+/** What a price's change is measured over, after the numbers. */
+const changeSuffix: Record<PriceSession | 'live', string> = {
+  live: 'today',
+  close: 'at close',
+  pre: 'pre-market',
+  post: 'after hours',
+}
+
 function WatchItemDetails({
   item,
+  live,
   quote,
   failure,
   now,
   onDone,
 }: {
   item: WatchItem
+  live: LivePrice | undefined
+  /** Finnhub's regular-session quote, for the day's stats */
   quote: Quote | undefined
   failure: QuoteError | undefined
   now: number
@@ -507,29 +568,39 @@ function WatchItemDetails({
   return (
     <div className="space-y-4">
       {/* Takes the dialog's initial focus, so opening it doesn't pop up the keyboard */}
-      {quote ? (
+      {live ? (
         <div tabIndex={-1} className="outline-none">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <p className="text-3xl font-semibold tabular-nums">{formatPrice(quote.price)}</p>
-            <p className={`tabular-nums ${pnlColor(quote.change)}`}>
-              {formatSignedPrice(quote.change)} ({formatSignedPercent(quote.changePct)}) today
+            <p className="text-3xl font-semibold tabular-nums">{formatPrice(live.price)}</p>
+            <p className={`tabular-nums ${pnlColor(live.change)}`}>
+              {formatSignedPrice(live.change)} ({formatSignedPercent(live.changePct)}){' '}
+              {changeSuffix[live.session ?? 'live']}
             </p>
           </div>
-          <dl className="mt-3 grid grid-cols-4 gap-2">
-            <Stat label="Open" value={quote.open} />
-            <Stat label="High" value={quote.high} />
-            <Stat label="Low" value={quote.low} />
-            <Stat label="Prev close" value={quote.prevClose} />
-          </dl>
+          {live.source === 'yahoo' && quote && (
+            <p className="mt-1 text-sm text-muted tabular-nums">
+              At close {formatPrice(quote.price)}{' '}
+              <span className={pnlColor(quote.changePct)}>
+                ({formatSignedPercent(quote.changePct)})
+              </span>
+            </p>
+          )}
+          {quote && (
+            <dl className="mt-3 grid grid-cols-4 gap-2">
+              <Stat label="Open" value={quote.open} />
+              <Stat label="High" value={quote.high} />
+              <Stat label="Low" value={quote.low} />
+              <Stat label="Prev close" value={quote.prevClose} />
+            </dl>
+          )}
           <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-            {quote.priceTime > 0 && (
+            {live.time > 0 && (
               <span>
-                {priceSessionLong[priceSession(quote.priceTime, now) ?? 'live']} from{' '}
-                {formatClock(quote.priceTime)}
+                {priceSessionLong[live.session ?? 'live']} from {formatClock(live.time)}
               </span>
             )}
-            <span>Checked {formatAge(quote.fetchedAt, now)}</span>
-            <StaleLabel quote={quote} failure={failure} now={now} />
+            <span>Checked {formatAge(live.fetchedAt, now)}</span>
+            <StaleLabel price={live} failure={failure} now={now} />
           </p>
           {failure && failure !== 'not-found' && (
             <p className="mt-2 text-sm text-amber-200">{quoteErrorLong[failure]}</p>
@@ -620,10 +691,11 @@ function Watchlist() {
       ]),
     [watchlist, openTrades],
   )
-  const quotes = useQuotes(symbols)
+  const live = useLivePrices(symbols, now)
   const apiKey = settings?.finnhubApiKey ?? ''
-  const refresh = usePriceRefresh(symbols, apiKey, online, status.retryAt)
-  const canRefresh = Boolean(apiKey) && online && symbols.length > 0
+  const relayUrl = settings?.priceRelayUrl ?? ''
+  const refresh = usePriceRefresh(symbols, { apiKey, relayUrl }, online, status.retryAt)
+  const canRefresh = Boolean(apiKey || relayUrl) && online && symbols.length > 0
 
   // Symbols you've traded but don't watch, most recent first
   const suggestions = useMemo(() => {
@@ -635,24 +707,24 @@ function Watchlist() {
 
   const newest = useMemo(() => {
     let latest: number | null = null
-    for (const q of quotes?.values() ?? []) latest = Math.max(latest ?? 0, q.fetchedAt)
+    for (const p of live?.prices.values() ?? []) latest = Math.max(latest ?? 0, p.fetchedAt)
     return latest
-  }, [quotes])
+  }, [live])
 
   const selectedItem = watchlist?.find((w) => w.symbol === selected) ?? null
   const ready =
-    settings !== undefined &&
-    watchlist !== undefined &&
-    trades !== undefined &&
-    quotes !== undefined
+    settings !== undefined && watchlist !== undefined && trades !== undefined && live !== undefined
   // Rows show a placeholder instead of "—" while their first price is on the way
   const loading = status.refreshing && canRefresh
-  // Offline, every price on screen is the last known one
-  const failures = useMemo(
-    (): Readonly<Record<string, QuoteError>> =>
-      online ? status.failures : Object.fromEntries(symbols.map((s) => [s, 'offline'])),
-    [online, status.failures, symbols],
-  )
+  // The failure behind each symbol's price, from the source it came from
+  const failures = useMemo(() => {
+    const out: Record<string, QuoteError> = {}
+    for (const s of symbols) {
+      const failure = priceFailure(live?.prices.get(s), s, status, online)
+      if (failure) out[s] = failure
+    }
+    return out
+  }, [symbols, live, status, online])
 
   return (
     <>
@@ -660,7 +732,7 @@ function Watchlist() {
       <Screen
         title="Watchlist"
         action={
-          apiKey ? (
+          apiKey || relayUrl ? (
             <button
               type="button"
               onClick={() => refresh(MANUAL_REFRESH_AGE)}
@@ -683,11 +755,14 @@ function Watchlist() {
               hasSymbols={symbols.length > 0}
               now={now}
             />
+            {apiKey && online && status.problem !== 'invalid-key' && symbols.length > 0 && (
+              <ExtendedNote relayUrl={relayUrl} problem={status.extendedProblem} now={now} />
+            )}
 
             {openTrades.length > 0 && (
               <OpenPositionsSection
                 trades={openTrades}
-                quotes={quotes}
+                prices={live.prices}
                 failures={failures}
                 loading={loading}
                 currency={settings.currency}
@@ -708,7 +783,7 @@ function Watchlist() {
                     <WatchRow
                       key={item.symbol}
                       item={item}
-                      quote={quotes.get(item.symbol)}
+                      live={live.prices.get(item.symbol)}
                       failure={failures[item.symbol]}
                       loading={loading}
                       now={now}
@@ -732,7 +807,8 @@ function Watchlist() {
           <WatchItemDetails
             key={selectedItem.symbol}
             item={selectedItem}
-            quote={quotes?.get(selectedItem.symbol)}
+            live={live?.prices.get(selectedItem.symbol)}
+            quote={live?.quotes.get(selectedItem.symbol)}
             failure={failures[selectedItem.symbol]}
             now={now}
             onDone={() => setSelected(null)}

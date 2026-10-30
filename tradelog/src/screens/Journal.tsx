@@ -4,11 +4,12 @@ import BackupReminder from '../components/BackupReminder.tsx'
 import QuickCloseDialog from '../components/QuickCloseDialog.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
 import TradeRow from '../components/TradeRow.tsx'
-import { useQuotes } from '../db/quotes.ts'
-import type { Quote, Trade } from '../db/schema.ts'
+import { useLivePrices } from '../db/quotes.ts'
+import type { Trade } from '../db/schema.ts'
 import { useSettings } from '../db/settings.ts'
 import { useTrades } from '../db/trades.ts'
 import { distinctSorted, filterTrades, journalScroll, type JournalFilters } from '../lib/journal.ts'
+import type { LivePrice } from '../lib/extended.ts'
 import { isClosed } from '../lib/pnl.ts'
 import { isStale } from '../lib/prices.ts'
 import { useNow } from '../lib/useNow.ts'
@@ -100,11 +101,11 @@ function Journal() {
     () => (trades ?? []).filter((t) => !isClosed(t)).map((t) => t.symbol),
     [trades],
   )
-  const quotes = useQuotes(openSymbols)
+  const prices = useLivePrices(openSymbols, now)?.prices
   const online = useOnline()
   // Prices only refresh on the watchlist, so an old one is labelled with its time
-  const stale = (quote: Quote | undefined) =>
-    quote !== undefined && isStale(quote, online ? undefined : 'offline', now)
+  const stale = (live: LivePrice | undefined) =>
+    live !== undefined && isStale(live, online ? undefined : 'offline', now)
 
   // Filters live in the URL so they survive opening a trade and coming back
   const symbol = params.get('symbol') ?? ''
@@ -190,8 +191,8 @@ function Journal() {
                   key={t.id}
                   trade={t}
                   currency={currency}
-                  quote={quotes?.get(t.symbol)}
-                  quoteStale={stale(quotes?.get(t.symbol))}
+                  live={prices?.get(t.symbol)}
+                  liveStale={stale(prices?.get(t.symbol))}
                   onQuickClose={setClosing}
                 />
               ))}

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { refreshQuotes, usePriceStatus, useQuotes } from '../db/quotes.ts'
+import { priceFailure, refreshQuotes, useLivePrices, usePriceStatus } from '../db/quotes.ts'
 import type { Trade } from '../db/schema.ts'
 import { useSettings } from '../db/settings.ts'
 import { closeTrade } from '../db/trades.ts'
@@ -7,6 +7,7 @@ import { today } from '../lib/dates.ts'
 import { formatAge, formatPrice, formatQuantity } from '../lib/format.ts'
 import { isStale } from '../lib/prices.ts'
 import { draftFromTrade, validateDraft } from '../lib/tradeDraft.ts'
+import { useNow } from '../lib/useNow.ts'
 import { useOnline } from '../lib/useOnline.ts'
 import Field from './Field.tsx'
 import Modal from './Modal.tsx'
@@ -45,19 +46,22 @@ function QuickCloseForm({
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const { finnhubApiKey } = useSettings()
-  const quote = useQuotes([trade.symbol])?.get(trade.symbol)
-  const { refreshing, failures } = usePriceStatus()
+  const { finnhubApiKey, priceRelayUrl } = useSettings()
+  const status = usePriceStatus()
   const online = useOnline()
+  const now = useNow(30_000)
+  const quote = useLivePrices([trade.symbol], now)?.prices.get(trade.symbol)
 
   // Closing "at current price" deserves a current price: one request for this
-  // symbol, through the shared cache and rate limit
+  // symbol (plus its after-hours price), through the shared caches and rate limits
   useEffect(() => {
-    if (finnhubApiKey) void refreshQuotes([trade.symbol], finnhubApiKey)
-  }, [trade.symbol, finnhubApiKey])
+    void refreshQuotes([trade.symbol], { apiKey: finnhubApiKey, relayUrl: priceRelayUrl })
+  }, [trade.symbol, finnhubApiKey, priceRelayUrl])
   const currentPrice = quote ? String(quote.price) : ''
   const priceStale =
-    quote !== undefined && isStale(quote, online ? failures[trade.symbol] : 'offline')
+    quote !== undefined && isStale(quote, priceFailure(quote, trade.symbol, status, online))
+  const sessionText =
+    quote?.session === 'pre' ? ' pre-market' : quote?.session === 'post' ? ' after-hours' : ''
 
   // Reuse the full trade validation so the rules match the edit form exactly
   const result = validateDraft({ ...draftFromTrade(trade), exitPrice, exitDate, fees })
@@ -130,12 +134,12 @@ function QuickCloseForm({
           onClick={() => setExitPrice(currentPrice)}
           className={`${chipClass} -mt-1 tabular-nums`}
         >
-          Use {priceStale ? 'last' : 'current'} price {formatPrice(quote.price)} ·{' '}
-          {formatAge(quote.fetchedAt)}
+          Use {priceStale ? 'last' : 'current'}
+          {sessionText} price {formatPrice(quote.price)} · {formatAge(quote.fetchedAt)}
         </button>
       ) : (
-        finnhubApiKey &&
-        refreshing && <p className="-mt-1 text-sm text-muted">Getting the current price…</p>
+        (finnhubApiKey || priceRelayUrl) &&
+        status.refreshing && <p className="-mt-1 text-sm text-muted">Getting the current price…</p>
       )}
       <Field
         id="close-fees"

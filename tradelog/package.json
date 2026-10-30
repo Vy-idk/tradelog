@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest --passWithNoTests"
+    "test": "vitest --passWithNoTests",
+    "relay:dev": "npx --yes wrangler@4 dev --config relay/wrangler.toml --ip 127.0.0.1 --port 8787",
+    "relay:deploy": "npx --yes wrangler@4 deploy --config relay/wrangler.toml"
   },
   "dependencies": {
     "dexie": "^4.4.7",

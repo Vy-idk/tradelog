@@ -1,0 +1,10 @@
+# Cloudflare Worker that relays Yahoo Finance prices to TradeLog.
+# Deploy from this folder with: npx wrangler deploy
+name = "tradelog-prices"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Pages allowed to read the relay's answers. Add your LAN address
+# (e.g. http://192.168.1.20:5173) here to test on the phone in dev.
+ALLOWED_ORIGINS = "https://vy-idk.github.io,http://localhost:5173,http://localhost:4173"

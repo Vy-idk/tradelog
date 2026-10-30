@@ -54,9 +54,27 @@ export type Quote = {
   fetchedAt: number
 }
 
+/** A pre-market or after-hours trade from Yahoo Finance, via the price relay. */
+export type ExtendedQuote = {
+  symbol: string
+  session: 'pre' | 'post'
+  price: number
+  /** Change from the regular session's last close */
+  change: number
+  changePct: number
+  /** That regular-session close */
+  regularPrice: number
+  /** When the trade happened (ms) */
+  time: number
+  /** When TradeLog fetched it (ms) */
+  fetchedAt: number
+}
+
 export type Settings = {
   id: 'app'
   finnhubApiKey: string
+  /** The Cloudflare Worker that relays Yahoo's pre-market and after-hours prices */
+  priceRelayUrl: string
   currency: string
   startingBalance: number
   lastBackupAt: number | null
@@ -70,6 +88,8 @@ export class TradeLogDB extends Dexie {
   settings!: Table<Settings, string>
   /** A cache, not journal data: never backed up or restored */
   quotes!: Table<Quote, string>
+  /** Also a cache, like quotes */
+  extendedQuotes!: Table<ExtendedQuote, string>
 
   constructor() {
     super('tradelog')
@@ -83,6 +103,9 @@ export class TradeLogDB extends Dexie {
     // Adds a table, so no upgrade function is needed
     this.version(2).stores({
       quotes: 'symbol',
+    })
+    this.version(3).stores({
+      extendedQuotes: 'symbol',
     })
   }
 }

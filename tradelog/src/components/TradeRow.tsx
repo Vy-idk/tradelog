@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
-import type { Quote, Trade } from '../db/schema.ts'
+import type { Trade } from '../db/schema.ts'
+import type { LivePrice } from '../lib/extended.ts'
 import {
   formatClock,
   formatDateRange,
@@ -8,6 +9,7 @@ import {
   formatSignedMoney,
   formatSignedPercent,
 } from '../lib/format.ts'
+import { priceSessionShort } from '../lib/market.ts'
 import { isClosed, returnPct, tradePnl, unrealizedPnl } from '../lib/pnl.ts'
 import { SideBadge, StatusBadge } from './Badges.tsx'
 import { pnlColor } from './styles.ts'
@@ -16,17 +18,18 @@ type Props = {
   trade: Trade
   currency: string
   /** The last saved price, for an open trade's unrealized P&L */
-  quote?: Quote
-  /** True when the quote may be out of date, e.g. it's old or the device is offline */
-  quoteStale: boolean
+  live?: LivePrice
+  /** True when the price may be out of date, e.g. it's old or the device is offline */
+  liveStale: boolean
   onQuickClose: (trade: Trade) => void
 }
 
-function TradeRow({ trade, currency, quote, quoteStale, onQuickClose }: Props) {
+function TradeRow({ trade, currency, live, liveStale, onQuickClose }: Props) {
   const closed = isClosed(trade)
   const pnl = tradePnl(trade)
   const pct = returnPct(trade)
-  const unrealized = !closed && quote ? unrealizedPnl(trade, quote.price) : null
+  const unrealized = !closed && live ? unrealizedPnl(trade, live.price) : null
+  const extendedSession = live?.session === 'pre' || live?.session === 'post' ? live.session : null
   // Entry → exit date, then strategy and tags
   const details = [
     formatDateRange(trade.entryDate, trade.exitDate),
@@ -62,13 +65,15 @@ function TradeRow({ trade, currency, quote, quoteStale, onQuickClose }: Props) {
             )}
           </div>
         )}
-        {unrealized !== null && quote && (
+        {unrealized !== null && live && (
           <div className="shrink-0 text-right tabular-nums">
             <p className={`font-medium ${pnlColor(unrealized)}`}>
               {formatSignedMoney(unrealized, currency)}
             </p>
-            {quoteStale ? (
-              <p className="text-xs text-amber-300">as of {formatClock(quote.fetchedAt)}</p>
+            {liveStale ? (
+              <p className="text-xs text-amber-300">as of {formatClock(live.fetchedAt)}</p>
+            ) : extendedSession ? (
+              <p className="text-xs text-open">{priceSessionShort[extendedSession]}</p>
             ) : (
               <p className="text-xs text-muted">unrealized</p>
             )}

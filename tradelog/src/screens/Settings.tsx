@@ -11,7 +11,7 @@ import {
   useBackupSource,
   type SaveOutcome,
 } from '../db/backup.ts'
-import { testApiKey } from '../db/quotes.ts'
+import { testApiKey, testRelay } from '../db/quotes.ts'
 import type { Settings as AppSettings } from '../db/schema.ts'
 import { updateSettings } from '../db/settings.ts'
 import {
@@ -24,6 +24,7 @@ import {
   type ParseResult,
 } from '../lib/backup.ts'
 import { formatDaysAgo, formatMoney, formatPrice } from '../lib/format.ts'
+import type { ExtendedResult } from '../lib/extended.ts'
 import type { QuoteResult } from '../lib/prices.ts'
 import { parseNumber } from '../lib/tradeDraft.ts'
 
@@ -283,6 +284,157 @@ function PriceSettings({ settings }: { settings: AppSettings }) {
           Get a free key
         </a>
         , then paste it here. A new device needs the key entered again.
+      </p>
+    </form>
+  )
+}
+
+/** What a relay test found, in words. */
+function relayTestText(result: ExtendedResult): Status {
+  if (result.ok) {
+    if (result.failed.size > 0) {
+      return {
+        tone: 'error',
+        text: 'The relay answered, but Yahoo failed for AAPL. Try again in a minute.',
+      }
+    }
+    const q = result.quotes.get('AAPL')
+    if (!q) {
+      return { tone: 'ok', text: 'Relay works. AAPL has no pre-market or after-hours trade yet.' }
+    }
+    const session = q.session === 'pre' ? 'pre-market' : 'after hours'
+    return { tone: 'ok', text: `Relay works: AAPL ${session} ${formatPrice(q.price)}.` }
+  }
+  switch (result.error) {
+    case 'bad-relay':
+      return {
+        tone: 'error',
+        text: 'That URL answered, but not like the TradeLog relay. Copy the workers.dev address wrangler printed.',
+      }
+    case 'rate-limited':
+      return {
+        tone: 'error',
+        text: 'Yahoo is rate limiting the relay. Wait a minute and test again.',
+      }
+    case 'offline':
+      return { tone: 'error', text: "Saved. You're offline, so the relay will be checked later." }
+    default:
+      return {
+        tone: 'error',
+        text: "Couldn't reach the relay. Check the URL, and that this site is listed in ALLOWED_ORIGINS.",
+      }
+  }
+}
+
+/** A relay URL as saved: no spaces, no trailing slash or /quotes path. */
+function normalizeRelayUrl(text: string): string {
+  return text
+    .trim()
+    .replace(/\/quotes\/?$/, '')
+    .replace(/\/+$/, '')
+}
+
+function RelaySettings({ settings }: { settings: AppSettings }) {
+  const { priceRelayUrl } = settings
+  const [params] = useSearchParams()
+  const [url, setUrl] = useState(priceRelayUrl)
+  const [error, setError] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [status, setStatus] = useState<Status | null>(null)
+
+  // Show the stored URL when it changes elsewhere
+  const [shown, setShown] = useState(priceRelayUrl)
+  if (shown !== priceRelayUrl) {
+    setShown(priceRelayUrl)
+    setUrl(priceRelayUrl)
+  }
+
+  const normalized = normalizeRelayUrl(url)
+  const changed = normalized !== priceRelayUrl
+
+  /** Saves the URL, then asks the relay for one price. Blur only saves a change. */
+  async function save(e?: FormEvent) {
+    e?.preventDefault()
+    if (!e && !changed) return
+    // https, or plain http for a relay running on this computer while developing
+    const valid = /^(https:\/\/[^\s/]+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)(\/\S*)?$/
+    if (normalized && !valid.test(normalized)) {
+      return setError('Enter the https:// address of your relay')
+    }
+    setError('')
+    if (changed) await updateSettings({ priceRelayUrl: normalized })
+    setUrl(normalized)
+    if (!normalized) {
+      setStatus(
+        priceRelayUrl ? { tone: 'ok', text: 'Relay removed. Showing closing prices only.' } : null,
+      )
+      return
+    }
+    setTesting(true)
+    setStatus(null)
+    try {
+      setStatus(relayTestText(await testRelay(normalized)))
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <form noValidate onSubmit={save} className="space-y-4">
+      <Field
+        id="settings-relay"
+        label="Price relay URL"
+        error={error}
+        hint="Your Cloudflare Worker, e.g. https://tradelog-prices.you.workers.dev"
+      >
+        <input
+          {...fieldA11y('settings-relay', error || undefined)}
+          className={`${inputClass} font-mono text-sm`}
+          type="url"
+          inputMode="url"
+          value={url}
+          onChange={(e) => {
+            setUrl(e.target.value)
+            setStatus(null)
+          }}
+          onBlur={() => save()}
+          autoFocus={params.get('focus') === 'relay'}
+          autoComplete="off"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="done"
+          placeholder="https://…workers.dev"
+        />
+      </Field>
+
+      <button
+        type="submit"
+        disabled={testing || (!normalized && !priceRelayUrl)}
+        className="w-full rounded-xl border border-border py-3 font-medium disabled:opacity-40"
+      >
+        {testing
+          ? 'Checking…'
+          : changed
+            ? normalized
+              ? 'Save and test'
+              : 'Remove relay'
+            : 'Test relay'}
+      </button>
+
+      {status && (
+        <p
+          role={status.tone === 'error' ? 'alert' : 'status'}
+          className={`text-sm ${status.tone === 'error' ? 'text-loss' : 'text-gain'}`}
+        >
+          {status.text}
+        </p>
+      )}
+
+      <p className="text-xs text-muted">
+        Pre-market (4:00–9:30 AM New York time) and after-hours (4:00–8:00 PM) prices come from
+        Yahoo Finance through your own free Cloudflare Worker, since Yahoo doesn&apos;t let web apps
+        call it directly. The setup steps are in the relay folder&apos;s README.
       </p>
     </form>
   )
@@ -602,6 +754,9 @@ function Settings() {
           </Section>
           <Section title="Prices">
             <PriceSettings settings={source.settings} />
+          </Section>
+          <Section title="Pre-market and after hours">
+            <RelaySettings settings={source.settings} />
           </Section>
           <Section title="Backup">
             <BackupSettings source={source} />

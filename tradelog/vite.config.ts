@@ -6,6 +6,9 @@ import { VitePWA } from 'vite-plugin-pwa'
 // https://vite.dev/config/
 export default defineConfig({
   base: '/tradelog/', // must match the GitHub repo name
+  // The price relay is a separate Cloudflare Worker; its local dev state
+  // would otherwise reload the app on every request it serves
+  server: { watch: { ignored: ['**/relay/**'] } },
   plugins: [
     react(),
     tailwindcss(),

@@ -4,6 +4,7 @@ import { db, type Settings } from './schema.ts'
 export const DEFAULT_SETTINGS: Settings = {
   id: 'app',
   finnhubApiKey: '',
+  priceRelayUrl: '',
   currency: 'USD',
   startingBalance: 0,
   lastBackupAt: null,
