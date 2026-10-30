@@ -36,6 +36,24 @@ export type WatchItem = {
   note?: string
 }
 
+/** The last price fetched for a symbol, kept so it still shows offline. */
+export type Quote = {
+  symbol: string
+  /** Last traded price */
+  price: number
+  /** Change since the previous close */
+  change: number
+  changePct: number
+  prevClose: number
+  open: number
+  high: number
+  low: number
+  /** When the exchange set this price (ms); 0 if unknown */
+  priceTime: number
+  /** When TradeLog fetched it (ms) */
+  fetchedAt: number
+}
+
 export type Settings = {
   id: 'app'
   finnhubApiKey: string
@@ -50,6 +68,8 @@ export class TradeLogDB extends Dexie {
   trades!: Table<Trade, string>
   watchlist!: Table<WatchItem, string>
   settings!: Table<Settings, string>
+  /** A cache, not journal data: never backed up or restored */
+  quotes!: Table<Quote, string>
 
   constructor() {
     super('tradelog')
@@ -59,6 +79,10 @@ export class TradeLogDB extends Dexie {
       trades: 'id, symbol, entryDate, exitDate, strategy, *tags',
       watchlist: 'symbol',
       settings: 'id',
+    })
+    // Adds a table, so no upgrade function is needed
+    this.version(2).stores({
+      quotes: 'symbol',
     })
   }
 }

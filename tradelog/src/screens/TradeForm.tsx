@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import ConfirmDialog from '../components/ConfirmDialog.tsx'
 import Field from '../components/Field.tsx'
 import PnlPreview from '../components/PnlPreview.tsx'
@@ -23,6 +23,7 @@ import {
   draftsEqual,
   emptyDraft,
   FIELD_ORDER,
+  normalizeSymbol,
   validateDraft,
   type DraftField,
   type TradeDraft,
@@ -102,8 +103,14 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
   const { currency } = useSettings()
   const trades = useTrades()
   const isNew = trade === null
+  // "Log a trade" on the watchlist opens the form with the symbol filled in
+  const [params] = useSearchParams()
+  const presetSymbol = isNew ? normalizeSymbol(params.get('symbol') ?? '') : ''
 
-  const initial = useMemo(() => (trade ? draftFromTrade(trade) : emptyDraft(today())), [trade])
+  const initial = useMemo(
+    () => (trade ? draftFromTrade(trade) : { ...emptyDraft(today()), symbol: presetSymbol }),
+    [trade, presetSymbol],
+  )
   const [draft, setDraft] = useState<TradeDraft>(initial)
   const [tagText, setTagText] = useState('')
   const [submitted, setSubmitted] = useState(false)
@@ -241,7 +248,7 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
               value={draft.symbol}
               onChange={(e) => set('symbol', e.target.value.toUpperCase())}
               placeholder="AAPL"
-              autoFocus={isNew}
+              autoFocus={isNew && !presetSymbol}
               autoCapitalize="characters"
               autoCorrect="off"
               autoComplete="off"
@@ -285,6 +292,7 @@ function TradeFormBody({ trade }: { trade: Trade | null }) {
               className={inputClass}
               value={draft.quantity}
               onChange={(e) => set('quantity', e.target.value)}
+              autoFocus={isNew && Boolean(presetSymbol)}
               inputMode="decimal"
               autoComplete="off"
               enterKeyHint="next"

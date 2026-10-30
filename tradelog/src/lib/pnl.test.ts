@@ -3,11 +3,14 @@ import type { Trade } from '../db/schema.ts'
 import {
   dailyEquity,
   equityCurve,
+  openPositions,
   pnlByMonth,
   pnlByStrategy,
   returnPct,
   tradePnl,
   tradeStats,
+  unrealizedPnl,
+  unrealizedReturnPct,
 } from './pnl.ts'
 
 const base = { quantity: 10, entryPrice: 100, fees: 0 }
@@ -217,5 +220,54 @@ describe('pnlByStrategy', () => {
       { strategy: 'Breakout', pnl: 5, count: 2, wins: 1 },
       { strategy: 'Earnings', pnl: -30, count: 1, wins: 0 },
     ])
+  })
+})
+
+describe('unrealizedPnl', () => {
+  it('uses the current price as the exit, for longs and shorts', () => {
+    expect(unrealizedPnl({ ...base, side: 'long' }, 112)).toBe(120)
+    expect(unrealizedPnl({ ...base, side: 'long' }, 95)).toBe(-50)
+    expect(unrealizedPnl({ ...base, side: 'short' }, 95)).toBe(50)
+    expect(unrealizedPnl({ ...base, side: 'short' }, 112)).toBe(-120)
+  })
+
+  it('subtracts the fees logged so far', () => {
+    expect(unrealizedPnl({ ...base, side: 'long', fees: 4 }, 110)).toBe(96)
+  })
+
+  it('gives the return on the capital put in', () => {
+    expect(unrealizedReturnPct({ ...base, side: 'long' }, 105)).toBe(5)
+    expect(unrealizedReturnPct({ ...base, side: 'short' }, 105)).toBe(-5)
+  })
+})
+
+describe('openPositions', () => {
+  it('totals open trades that have a price and counts the rest', () => {
+    const trades = [
+      trade(null, { symbol: 'AAPL', quantity: 10 }),
+      trade(null, { symbol: 'TSLA', side: 'short', entryPrice: 200, quantity: 2, fees: 1 }),
+      trade(null, { symbol: 'NOPE' }),
+      // Closed trades are ignored, even with a price
+      trade(25, { symbol: 'AAPL' }),
+    ]
+    const prices = new Map([
+      ['AAPL', 103],
+      ['TSLA', 190],
+    ])
+    expect(openPositions(trades, prices)).toEqual({
+      count: 3,
+      priced: 2,
+      unrealizedPnl: 30 + 19,
+      costBasis: 1000 + 400,
+    })
+  })
+
+  it('is all zeros without open trades', () => {
+    expect(openPositions([trade(5)], new Map())).toEqual({
+      count: 0,
+      priced: 0,
+      unrealizedPnl: 0,
+      costBasis: 0,
+    })
   })
 })

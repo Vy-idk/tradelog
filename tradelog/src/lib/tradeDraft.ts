@@ -94,6 +94,14 @@ export function normalizeSymbol(text: string): string {
   return text.trim().toUpperCase()
 }
 
+/** Why a normalized symbol isn't usable, or null if it's fine. */
+export function symbolError(symbol: string): string | null {
+  if (!symbol) return 'Symbol is required'
+  if (symbol.length > 15) return 'Use 15 characters or fewer'
+  if (!/^[A-Z0-9][A-Z0-9.\-/:^=]*$/.test(symbol)) return 'Use letters, numbers and . - / : only'
+  return null
+}
+
 /** Trims and collapses whitespace; empty string means "not a tag". */
 export function normalizeTag(text: string): string {
   return text.trim().replace(/\s+/g, ' ')
@@ -124,10 +132,8 @@ export function validateDraft(draft: TradeDraft): DraftResult {
   const errors: DraftErrors = {}
 
   const symbol = normalizeSymbol(draft.symbol)
-  if (!symbol) errors.symbol = 'Symbol is required'
-  else if (symbol.length > 15) errors.symbol = 'Use 15 characters or fewer'
-  else if (!/^[A-Z0-9][A-Z0-9.\-/:^=]*$/.test(symbol))
-    errors.symbol = 'Use letters, numbers and . - / : only'
+  const badSymbol = symbolError(symbol)
+  if (badSymbol) errors.symbol = badSymbol
 
   if (draft.side !== 'long' && draft.side !== 'short') errors.side = 'Pick long or short'
 

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Field from '../components/Field.tsx'
 import Modal from '../components/Modal.tsx'
 import Screen from '../components/Screen.tsx'
@@ -10,6 +11,7 @@ import {
   useBackupSource,
   type SaveOutcome,
 } from '../db/backup.ts'
+import { testApiKey } from '../db/quotes.ts'
 import type { Settings as AppSettings } from '../db/schema.ts'
 import { updateSettings } from '../db/settings.ts'
 import {
@@ -21,7 +23,8 @@ import {
   type ImportMode,
   type ParseResult,
 } from '../lib/backup.ts'
-import { formatDaysAgo, formatMoney } from '../lib/format.ts'
+import { formatDaysAgo, formatMoney, formatPrice } from '../lib/format.ts'
+import type { QuoteResult } from '../lib/prices.ts'
 import { parseNumber } from '../lib/tradeDraft.ts'
 
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'ILS', 'CAD', 'AUD', 'CHF', 'JPY']
@@ -140,6 +143,150 @@ function AccountSettings({ settings }: { settings: AppSettings }) {
 }
 
 type Status = { tone: 'ok' | 'error'; text: string }
+
+/** What a key test found, in words. */
+function keyTestText(result: QuoteResult | undefined): Status {
+  if (!result) return { tone: 'error', text: "Couldn't test the key." }
+  if (result.ok) {
+    return {
+      tone: 'ok',
+      text: `Key works: ${result.quote.symbol} is at ${formatPrice(result.quote.price)}.`,
+    }
+  }
+  switch (result.error) {
+    case 'invalid-key':
+      return {
+        tone: 'error',
+        text: 'Finnhub rejected this key. Copy it again from your Finnhub dashboard.',
+      }
+    case 'rate-limited':
+      return {
+        tone: 'error',
+        text: 'Finnhub is rate limiting this key. Wait a minute and test again.',
+      }
+    case 'offline':
+      return { tone: 'error', text: "Saved. You're offline, so the key will be checked later." }
+    case 'no-access':
+    case 'not-found':
+      // The key was accepted; only the test symbol had a problem
+      return { tone: 'ok', text: 'Key accepted by Finnhub.' }
+    default:
+      return { tone: 'error', text: "Saved, but Finnhub couldn't be reached to check it." }
+  }
+}
+
+function PriceSettings({ settings }: { settings: AppSettings }) {
+  const { finnhubApiKey } = settings
+  const [params] = useSearchParams()
+  const [key, setKey] = useState(finnhubApiKey)
+  const [reveal, setReveal] = useState(false)
+  const [error, setError] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [status, setStatus] = useState<Status | null>(null)
+
+  // Show the stored key when it changes elsewhere
+  const [shown, setShown] = useState(finnhubApiKey)
+  if (shown !== finnhubApiKey) {
+    setShown(finnhubApiKey)
+    setKey(finnhubApiKey)
+  }
+
+  const trimmed = key.trim()
+  const changed = trimmed !== finnhubApiKey
+
+  /** Saves the key, then checks it with Finnhub. Blur only saves a change. */
+  async function save(e?: FormEvent) {
+    e?.preventDefault()
+    if (!e && !changed) return
+    if (/\s/.test(trimmed)) return setError("API keys don't contain spaces")
+    if (trimmed.length > 100) return setError("That's too long for an API key")
+    setError('')
+    if (changed) await updateSettings({ finnhubApiKey: trimmed })
+    setKey(trimmed)
+    if (!trimmed) {
+      setStatus(finnhubApiKey ? { tone: 'ok', text: 'API key removed. Prices are off.' } : null)
+      return
+    }
+    setTesting(true)
+    setStatus(null)
+    try {
+      setStatus(keyTestText(await testApiKey(trimmed)))
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <form noValidate onSubmit={save} className="space-y-4">
+      <Field
+        id="settings-api-key"
+        label="Finnhub API key"
+        error={error}
+        hint="Saved only on this device and never included in backups"
+      >
+        <div className="flex gap-2">
+          <input
+            {...fieldA11y('settings-api-key', error || undefined)}
+            // A text field with masked dots, so iOS doesn't offer to save it as a password
+            className={`${inputClass} flex-1 font-mono ${reveal ? '' : '[-webkit-text-security:disc]'}`}
+            value={key}
+            onChange={(e) => {
+              setKey(e.target.value)
+              setStatus(null)
+            }}
+            onBlur={() => save()}
+            autoFocus={params.get('focus') === 'api-key'}
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            enterKeyHint="done"
+            placeholder="Paste your key"
+          />
+          <button
+            type="button"
+            onClick={() => setReveal((r) => !r)}
+            aria-pressed={reveal}
+            disabled={!key}
+            className="shrink-0 rounded-lg border border-border px-3 text-sm font-medium text-muted disabled:opacity-40"
+          >
+            {reveal ? 'Hide' : 'Show'}
+          </button>
+        </div>
+      </Field>
+
+      <button
+        type="submit"
+        disabled={testing || (!trimmed && !finnhubApiKey)}
+        className="w-full rounded-xl border border-border py-3 font-medium disabled:opacity-40"
+      >
+        {testing ? 'Checking…' : changed ? (trimmed ? 'Save and test' : 'Remove key') : 'Test key'}
+      </button>
+
+      {status && (
+        <p
+          role={status.tone === 'error' ? 'alert' : 'status'}
+          className={`text-sm ${status.tone === 'error' ? 'text-loss' : 'text-gain'}`}
+        >
+          {status.text}
+        </p>
+      )}
+
+      <p className="text-xs text-muted">
+        Prices come from Finnhub&apos;s free plan (US stocks, 60 requests a minute).{' '}
+        <a
+          href="https://finnhub.io/register"
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent underline underline-offset-2"
+        >
+          Get a free key
+        </a>
+        , then paste it here. A new device needs the key entered again.
+      </p>
+    </form>
+  )
+}
 
 const savedText: Record<Exclude<SaveOutcome, 'cancelled'>, string> = {
   shared: 'saved',
@@ -452,6 +599,9 @@ function Settings() {
         <>
           <Section title="Account">
             <AccountSettings settings={source.settings} />
+          </Section>
+          <Section title="Prices">
+            <PriceSettings settings={source.settings} />
           </Section>
           <Section title="Backup">
             <BackupSettings source={source} />

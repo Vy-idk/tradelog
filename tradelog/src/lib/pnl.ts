@@ -210,3 +210,45 @@ export function pnlByStrategy(trades: Trade[]): StrategyPnl[] {
     (a, b) => b.pnl - a.pnl || b.count - a.count || a.strategy.localeCompare(b.strategy),
   )
 }
+
+/**
+ * What an open trade would make if it closed at `price`, after the fees
+ * logged so far. Same formula as realized P&L.
+ */
+export function unrealizedPnl(trade: Omit<PnlFields, 'exitPrice'>, price: number): number {
+  return tradePnl({ ...trade, exitPrice: price })!
+}
+
+/** Unrealized P&L as a percentage of the capital put in, or null for zero cost. */
+export function unrealizedReturnPct(
+  trade: Omit<PnlFields, 'exitPrice'>,
+  price: number,
+): number | null {
+  return returnPct({ ...trade, exitPrice: price })
+}
+
+export type OpenPositions = {
+  /** Open trades */
+  count: number
+  /** Open trades with a known price */
+  priced: number
+  /** Unrealized P&L of the priced trades */
+  unrealizedPnl: number
+  /** Entry × quantity of the priced trades */
+  costBasis: number
+}
+
+/** Totals over open trades, using a price per symbol where one is known. */
+export function openPositions(trades: Trade[], prices: ReadonlyMap<string, number>): OpenPositions {
+  const summary: OpenPositions = { count: 0, priced: 0, unrealizedPnl: 0, costBasis: 0 }
+  for (const t of trades) {
+    if (isClosed(t)) continue
+    summary.count++
+    const price = prices.get(t.symbol)
+    if (price === undefined) continue
+    summary.priced++
+    summary.unrealizedPnl += unrealizedPnl(t, price)
+    summary.costBasis += t.entryPrice * t.quantity
+  }
+  return summary
+}

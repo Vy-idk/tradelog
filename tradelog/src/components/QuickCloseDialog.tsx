@@ -1,13 +1,17 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { refreshQuotes, usePriceStatus, useQuotes } from '../db/quotes.ts'
 import type { Trade } from '../db/schema.ts'
+import { useSettings } from '../db/settings.ts'
 import { closeTrade } from '../db/trades.ts'
 import { today } from '../lib/dates.ts'
-import { formatPrice, formatQuantity } from '../lib/format.ts'
+import { formatAge, formatPrice, formatQuantity } from '../lib/format.ts'
+import { isStale } from '../lib/prices.ts'
 import { draftFromTrade, validateDraft } from '../lib/tradeDraft.ts'
+import { useOnline } from '../lib/useOnline.ts'
 import Field from './Field.tsx'
 import Modal from './Modal.tsx'
 import PnlPreview from './PnlPreview.tsx'
-import { fieldA11y, inputClass } from './styles.ts'
+import { chipClass, fieldA11y, inputClass } from './styles.ts'
 
 type Props = {
   /** The open trade to close; null hides the dialog */
@@ -41,6 +45,19 @@ function QuickCloseForm({
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const { finnhubApiKey } = useSettings()
+  const quote = useQuotes([trade.symbol])?.get(trade.symbol)
+  const { refreshing, failures } = usePriceStatus()
+  const online = useOnline()
+
+  // Closing "at current price" deserves a current price: one request for this
+  // symbol, through the shared cache and rate limit
+  useEffect(() => {
+    if (finnhubApiKey) void refreshQuotes([trade.symbol], finnhubApiKey)
+  }, [trade.symbol, finnhubApiKey])
+  const currentPrice = quote ? String(quote.price) : ''
+  const priceStale =
+    quote !== undefined && isStale(quote, online ? failures[trade.symbol] : 'offline')
 
   // Reuse the full trade validation so the rules match the edit form exactly
   const result = validateDraft({ ...draftFromTrade(trade), exitPrice, exitDate, fees })
@@ -106,6 +123,20 @@ function QuickCloseForm({
           />
         </Field>
       </div>
+      {quote ? (
+        <button
+          type="button"
+          aria-pressed={exitPrice.trim() === currentPrice}
+          onClick={() => setExitPrice(currentPrice)}
+          className={`${chipClass} -mt-1 tabular-nums`}
+        >
+          Use {priceStale ? 'last' : 'current'} price {formatPrice(quote.price)} ·{' '}
+          {formatAge(quote.fetchedAt)}
+        </button>
+      ) : (
+        finnhubApiKey &&
+        refreshing && <p className="-mt-1 text-sm text-muted">Getting the current price…</p>
+      )}
       <Field
         id="close-fees"
         label="Fees"

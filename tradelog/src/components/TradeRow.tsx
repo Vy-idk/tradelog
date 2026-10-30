@@ -1,26 +1,32 @@
 import { Link } from 'react-router-dom'
-import type { Trade } from '../db/schema.ts'
+import type { Quote, Trade } from '../db/schema.ts'
 import {
+  formatClock,
   formatDateRange,
   formatPrice,
   formatQuantity,
   formatSignedMoney,
   formatSignedPercent,
 } from '../lib/format.ts'
-import { isClosed, returnPct, tradePnl } from '../lib/pnl.ts'
+import { isClosed, returnPct, tradePnl, unrealizedPnl } from '../lib/pnl.ts'
 import { SideBadge, StatusBadge } from './Badges.tsx'
 import { pnlColor } from './styles.ts'
 
 type Props = {
   trade: Trade
   currency: string
+  /** The last saved price, for an open trade's unrealized P&L */
+  quote?: Quote
+  /** True when the quote may be out of date, e.g. it's old or the device is offline */
+  quoteStale: boolean
   onQuickClose: (trade: Trade) => void
 }
 
-function TradeRow({ trade, currency, onQuickClose }: Props) {
+function TradeRow({ trade, currency, quote, quoteStale, onQuickClose }: Props) {
   const closed = isClosed(trade)
   const pnl = tradePnl(trade)
   const pct = returnPct(trade)
+  const unrealized = !closed && quote ? unrealizedPnl(trade, quote.price) : null
   // Entry → exit date, then strategy and tags
   const details = [
     formatDateRange(trade.entryDate, trade.exitDate),
@@ -53,6 +59,18 @@ function TradeRow({ trade, currency, onQuickClose }: Props) {
             <p className={`font-semibold ${pnlColor(pnl)}`}>{formatSignedMoney(pnl, currency)}</p>
             {pct !== null && (
               <p className={`text-xs ${pnlColor(pnl)}`}>{formatSignedPercent(pct)}</p>
+            )}
+          </div>
+        )}
+        {unrealized !== null && quote && (
+          <div className="shrink-0 text-right tabular-nums">
+            <p className={`font-medium ${pnlColor(unrealized)}`}>
+              {formatSignedMoney(unrealized, currency)}
+            </p>
+            {quoteStale ? (
+              <p className="text-xs text-amber-300">as of {formatClock(quote.fetchedAt)}</p>
+            ) : (
+              <p className="text-xs text-muted">unrealized</p>
             )}
           </div>
         )}

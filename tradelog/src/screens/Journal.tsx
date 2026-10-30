@@ -4,10 +4,15 @@ import BackupReminder from '../components/BackupReminder.tsx'
 import QuickCloseDialog from '../components/QuickCloseDialog.tsx'
 import Screen, { EmptyState } from '../components/Screen.tsx'
 import TradeRow from '../components/TradeRow.tsx'
-import type { Trade } from '../db/schema.ts'
+import { useQuotes } from '../db/quotes.ts'
+import type { Quote, Trade } from '../db/schema.ts'
 import { useSettings } from '../db/settings.ts'
 import { useTrades } from '../db/trades.ts'
 import { distinctSorted, filterTrades, journalScroll, type JournalFilters } from '../lib/journal.ts'
+import { isClosed } from '../lib/pnl.ts'
+import { isStale } from '../lib/prices.ts'
+import { useNow } from '../lib/useNow.ts'
+import { useOnline } from '../lib/useOnline.ts'
 
 type FilterKey = keyof JournalFilters
 
@@ -90,6 +95,16 @@ function Journal() {
   const [params, setParams] = useSearchParams()
   const [closing, setClosing] = useState<Trade | null>(null)
   const anchor = useJournalScroll(trades !== undefined)
+  const now = useNow(60_000)
+  const openSymbols = useMemo(
+    () => (trades ?? []).filter((t) => !isClosed(t)).map((t) => t.symbol),
+    [trades],
+  )
+  const quotes = useQuotes(openSymbols)
+  const online = useOnline()
+  // Prices only refresh on the watchlist, so an old one is labelled with its time
+  const stale = (quote: Quote | undefined) =>
+    quote !== undefined && isStale(quote, online ? undefined : 'offline', now)
 
   // Filters live in the URL so they survive opening a trade and coming back
   const symbol = params.get('symbol') ?? ''
@@ -171,7 +186,14 @@ function Journal() {
           ) : (
             <ul className="space-y-2 pb-20">
               {shown.map((t) => (
-                <TradeRow key={t.id} trade={t} currency={currency} onQuickClose={setClosing} />
+                <TradeRow
+                  key={t.id}
+                  trade={t}
+                  currency={currency}
+                  quote={quotes?.get(t.symbol)}
+                  quoteStale={stale(quotes?.get(t.symbol))}
+                  onQuickClose={setClosing}
+                />
               ))}
             </ul>
           )}

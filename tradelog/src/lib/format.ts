@@ -53,6 +53,13 @@ export function formatPrice(value: number): string {
   return priceFormat.format(value)
 }
 
+/** A price change with its sign, e.g. +1.25 or −0.40 */
+export function formatSignedPrice(value: number): string {
+  const abs = priceFormat.format(Math.abs(value))
+  if (Math.abs(value) < 0.00005) return abs
+  return `${value > 0 ? '+' : '−'}${abs}`
+}
+
 const quantityFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 8 })
 
 export function formatQuantity(value: number): string {
@@ -167,12 +174,44 @@ export function formatMonth(month: string, style: 'short' | 'year' | 'long' = 's
   return style === 'year' ? `${name} '${String(y).slice(2)}` : name
 }
 
-const relativeDays = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+
+const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
 /** A past timestamp as "today", "yesterday" or "5 days ago" (calendar days, local time) */
 export function formatDaysAgo(timestamp: number, now = new Date()): string {
   const then = new Date(timestamp)
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
   const days = Math.round((startOfDay(now) - startOfDay(then)) / 86_400_000)
-  return relativeDays.format(-Math.max(0, days), 'day')
+  return relativeTime.format(-Math.max(0, days), 'day')
+}
+
+const clockTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+const clockDate = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+const clockDateYear = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+/** A timestamp as "10:42 AM" today, "Oct 28, 10:42 AM" this year, else with the year. */
+export function formatClock(timestamp: number, now = new Date()): string {
+  const then = new Date(timestamp)
+  if (startOfDay(then) === startOfDay(now)) return clockTime.format(then)
+  return (then.getFullYear() === now.getFullYear() ? clockDate : clockDateYear).format(then)
+}
+
+/** How long ago, roughly: "just now", "5 minutes ago", "3 hours ago", "2 days ago". */
+export function formatAge(timestamp: number, now = Date.now()): string {
+  const seconds = Math.max(0, (now - timestamp) / 1000)
+  if (seconds < 45) return 'just now'
+  if (seconds < 3600) return relativeTime.format(-Math.max(1, Math.round(seconds / 60)), 'minute')
+  if (seconds < 86_400) return relativeTime.format(-Math.round(seconds / 3600), 'hour')
+  return relativeTime.format(-Math.round(seconds / 86_400), 'day')
 }
